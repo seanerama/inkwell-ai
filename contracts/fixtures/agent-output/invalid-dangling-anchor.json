@@ -1,0 +1,7 @@
+{
+  "summary": "Card anchor references an annotation that does not exist.",
+  "annotations": [],
+  "cards": [ { "kind": "answer", "title": "See here", "body": "", "anchors": [ { "annotation_id": "a9" } ], "actions": [] } ],
+  "brain_writes": [],
+  "_reject_reason": "anchor.annotation_id must match an annotation id in the same response"
+}

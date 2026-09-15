@@ -1,0 +1,6 @@
+{
+  "summary": "Unknown annotation type.",
+  "annotations": [ { "id": "a1", "type": "circle", "center": [0.5, 0.5], "r": 0.1 } ],
+  "cards": [], "brain_writes": [],
+  "_reject_reason": "type not in the v1 vocabulary"
+}

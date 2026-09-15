@@ -1,0 +1,9 @@
+{
+  "summary": "Duplicate annotation ids.",
+  "annotations": [
+    { "id": "a1", "type": "rect", "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.2 },
+    { "id": "a1", "type": "rect", "x": 0.5, "y": 0.5, "w": 0.2, "h": 0.2 }
+  ],
+  "cards": [], "brain_writes": [],
+  "_reject_reason": "annotation ids must be unique within a response"
+}

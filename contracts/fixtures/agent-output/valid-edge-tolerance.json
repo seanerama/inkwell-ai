@@ -1,0 +1,5 @@
+{
+  "summary": "Coordinates inside the clamp tolerance band are accepted and clamped by the server.",
+  "annotations": [ { "id": "a1", "type": "rect", "x": -0.04, "y": 1.03, "w": 0.5, "h": 0.5 } ],
+  "cards": [], "brain_writes": []
+}

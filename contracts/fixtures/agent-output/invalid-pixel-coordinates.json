@@ -1,0 +1,6 @@
+{
+  "summary": "Pixel values instead of normalized coordinates.",
+  "annotations": [ { "id": "a1", "type": "arrow", "from": [120, 340], "to": [900, 512] } ],
+  "cards": [], "brain_writes": [],
+  "_reject_reason": "coordinate outside [-0.05, 1.05] (contract coordinate-mapping §validation)"
+}

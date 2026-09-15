@@ -1,0 +1,552 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inkwell-ai/contracts/agent-output/v1",
+  "title": "AgentOutput",
+  "description": "Inkwell AI contract agent-output v1 (frozen). The single JSON object an agent returns for a to_agent job. All geometry is normalized [0,1] relative to the exported image bounds (contract coordinate-mapping).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "annotations",
+    "cards",
+    "brain_writes"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "annotations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Annotation"
+      }
+    },
+    "cards": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Card"
+      }
+    },
+    "brain_writes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BrainWrite"
+      }
+    }
+  },
+  "$defs": {
+    "Point": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "number"
+      },
+      "description": "[x, y] normalized. Server clamps within [-0.05, 1.05] and rejects outside."
+    },
+    "Rect": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "number"
+      },
+      "description": "[x, y, w, h] normalized."
+    },
+    "Color": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{6}$"
+    },
+    "Annotation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Highlight"
+        },
+        {
+          "$ref": "#/$defs/Arrow"
+        },
+        {
+          "$ref": "#/$defs/Ellipse"
+        },
+        {
+          "$ref": "#/$defs/RectAnnotation"
+        },
+        {
+          "$ref": "#/$defs/Underline"
+        },
+        {
+          "$ref": "#/$defs/Strikethrough"
+        },
+        {
+          "$ref": "#/$defs/Path"
+        },
+        {
+          "$ref": "#/$defs/Text"
+        },
+        {
+          "$ref": "#/$defs/MarginNote"
+        }
+      ]
+    },
+    "Highlight": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "points"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "highlight"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 3,
+          "items": {
+            "$ref": "#/$defs/Point"
+          }
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Arrow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "arrow"
+        },
+        "from": {
+          "$ref": "#/$defs/Point"
+        },
+        "to": {
+          "$ref": "#/$defs/Point"
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Ellipse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "center",
+        "rx",
+        "ry"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "ellipse"
+        },
+        "center": {
+          "$ref": "#/$defs/Point"
+        },
+        "rx": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "ry": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "RectAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "rect"
+        },
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "h": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Underline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "points"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "underline"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/Point"
+          }
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Strikethrough": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "points"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "strikethrough"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/Point"
+          }
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Path": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "points",
+        "closed"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "path"
+        },
+        "points": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/Point"
+          }
+        },
+        "closed": {
+          "type": "boolean"
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "at",
+        "text",
+        "size"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "text"
+        },
+        "at": {
+          "$ref": "#/$defs/Point"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "size": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 0.2,
+          "description": "Fraction of canvas height."
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "MarginNote": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "y",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "type": {
+          "const": "margin_note"
+        },
+        "y": {
+          "type": "number"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "color": {
+          "$ref": "#/$defs/Color"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 200
+        }
+      }
+    },
+    "Anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "annotation_id": {
+          "type": "string",
+          "description": "Must match an annotation id in the same response."
+        },
+        "region": {
+          "$ref": "#/$defs/Rect"
+        }
+      }
+    },
+    "CardAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "kind": {
+          "enum": [
+            "confirm",
+            "reject",
+            "run_tool",
+            "open_canvas",
+            "save_to_brain"
+          ]
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "title",
+        "body",
+        "anchors",
+        "actions"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "answer",
+            "task",
+            "fact",
+            "question",
+            "action",
+            "error"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "body": {
+          "type": "string",
+          "maxLength": 8000,
+          "description": "Markdown."
+        },
+        "anchors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Anchor"
+          }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardAction"
+          }
+        }
+      }
+    },
+    "BrainWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "text",
+        "tags"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "fact",
+            "task",
+            "reference",
+            "decision"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "source_region": {
+          "$ref": "#/$defs/Rect"
+        }
+      }
+    }
+  }
+}
