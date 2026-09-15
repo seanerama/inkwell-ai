@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -44,7 +45,7 @@ fun CanvasScreen(
     debugEnabled: Boolean = BuildConfig.DEBUG,
 ) {
     Column(modifier = modifier.fillMaxSize()) {
-        Toolbar(viewModel = viewModel, onOpenSettings = onOpenSettings)
+        Toolbar(viewModel = viewModel, onOpenSettings = onOpenSettings, debugEnabled = debugEnabled)
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(
                 modifier = Modifier.fillMaxSize().testTag(CanvasTags.SURFACE),
@@ -62,16 +63,63 @@ fun CanvasScreen(
                     view.debugEnabled = debugEnabled
                     view.setCanvasSize(viewModel.canvasWidth, viewModel.canvasHeight)
                     view.setCommittedStrokes(viewModel.strokes.toList())
+                    if (debugEnabled) {
+                        view.setAccentColor(viewModel.accentColor)
+                        view.setDebugHighlights(viewModel.fixtureAnnotations)
+                    }
                 },
             )
         }
     }
+
+    // Debug-only export preview (BuildConfig.DEBUG). No release-visible surface.
+    if (debugEnabled && viewModel.showExportPreview) {
+        ExportPreviewDialog(
+            bitmap = viewModel.exportBitmap,
+            info = viewModel.exportInfo,
+            onDismiss = viewModel::dismissExportPreview,
+        )
+    }
+}
+
+/** Debug-only dialog showing the exported PNG and its dimensions (or an error). */
+@Composable
+private fun ExportPreviewDialog(
+    bitmap: android.graphics.Bitmap?,
+    info: String?,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss, modifier = Modifier.testTag(CanvasTags.EXPORT_PREVIEW_CLOSE)) {
+                Text("Close")
+            }
+        },
+        title = { Text("Export preview") },
+        text = {
+            Column {
+                Text(info ?: "No export.", modifier = Modifier.testTag(CanvasTags.EXPORT_PREVIEW_INFO))
+                Spacer(Modifier.size(12.dp))
+                if (bitmap != null) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bitmap.asImageBitmap(),
+                        contentDescription = "Exported canvas PNG",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, Color.Gray),
+                    )
+                }
+            }
+        },
+    )
 }
 
 @Composable
 private fun Toolbar(
     viewModel: CanvasViewModel,
     onOpenSettings: () -> Unit,
+    debugEnabled: Boolean,
 ) {
     Row(
         modifier = Modifier
@@ -101,6 +149,18 @@ private fun Toolbar(
         }
 
         Spacer(Modifier.weight(1f))
+
+        // Debug-only tools (BuildConfig.DEBUG); absent from release builds.
+        if (debugEnabled) {
+            OutlinedButton(
+                onClick = viewModel::exportPreview,
+                modifier = Modifier.testTag(CanvasTags.EXPORT_PREVIEW),
+            ) { Text("Export preview") }
+            OutlinedButton(
+                onClick = viewModel::toggleFixture,
+                modifier = Modifier.testTag(CanvasTags.RENDER_FIXTURE),
+            ) { Text(if (viewModel.fixtureVisible) "Hide fixture" else "Render fixture") }
+        }
 
         OutlinedButton(
             onClick = viewModel::undoLast,
@@ -146,5 +206,9 @@ object CanvasTags {
     const val ERASER = "canvas_eraser"
     const val UNDO = "canvas_undo"
     const val SETTINGS = "canvas_settings"
+    const val EXPORT_PREVIEW = "canvas_export_preview"
+    const val RENDER_FIXTURE = "canvas_render_fixture"
+    const val EXPORT_PREVIEW_INFO = "canvas_export_preview_info"
+    const val EXPORT_PREVIEW_CLOSE = "canvas_export_preview_close"
     fun color(index: Int) = "canvas_color_$index"
 }

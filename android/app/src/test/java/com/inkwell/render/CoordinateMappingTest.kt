@@ -26,9 +26,12 @@ class CoordinateMappingTest {
         val (w, h) = CoordinateMapping.exportDimensions()
         // Contract guarantee: the longest edge is exactly 1568 px (A4 portrait → height).
         assertEquals(1568, h)
-        // Width follows from round(2480 * 1568/3508) = 1108.506 -> 1109. (The device-api
-        // POST /jobs *example* prints 1108; the coordinate-mapping formula is authoritative
-        // and uses round(), so 1108/1109 differ only by that example's rounding.)
-        org.junit.Assert.assertTrue("width was $w", w == 1108 || w == 1109)
+        // Width from the FORMULA (round), which is authoritative: round(2480 * 1568/3508)
+        // = round(1108.506) = 1109. The device-api POST /jobs example and the stage/
+        // acceptance prose print 1108 — that is the known off-by-one in issue #9. We follow
+        // round(), so the default canvas exports 1109×1568, and we assert 1109 explicitly.
+        val expectedW = Math.round(2480.0 * 1568.0 / 3508.0).toInt()
+        assertEquals(1109, expectedW)
+        assertEquals(1109, w)
     }
 }

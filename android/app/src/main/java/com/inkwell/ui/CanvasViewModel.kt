@@ -1,5 +1,7 @@
 package com.inkwell.ui
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -7,12 +9,18 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.inkwell.contracts.Annotation
 import com.inkwell.data.CanvasRepository
 import com.inkwell.data.StrokeCommitData
 import com.inkwell.ink.StrokeCommit
+import com.inkwell.render.AnnotationRenderer
+import com.inkwell.render.CanvasExporter
+import com.inkwell.render.ExportLayer
 import com.inkwell.render.RenderStroke
 import com.inkwell.render.StrokeMapper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * State + actions for [CanvasScreen]. Loads the default canvas and its strokes on
@@ -41,6 +49,24 @@ class CanvasViewModel(
     val strokes: SnapshotStateList<RenderStroke> = mutableStateListOf()
 
     private var inkLayerId: String? = null
+
+    // --- Debug-only (BuildConfig.DEBUG) export-preview + fixture-render state ---
+    /** Space accent color for agent annotations (SPEC §6.3). */
+    val accentColor: Int = AnnotationRenderer.DEFAULT_ACCENT
+
+    var showExportPreview by mutableStateOf(false)
+        private set
+    var exportBitmap by mutableStateOf<Bitmap?>(null)
+        private set
+    var exportInfo by mutableStateOf<String?>(null)
+        private set
+
+    var fixtureVisible by mutableStateOf(false)
+        private set
+
+    /** Fixture annotations to overlay when the "Render fixture" toggle is on. */
+    val fixtureAnnotations: List<Annotation>
+        get() = if (fixtureVisible) DebugFixtures.annotations else emptyList()
 
     init {
         viewModelScope.launch {
@@ -91,6 +117,46 @@ class CanvasViewModel(
         if (strokes.isEmpty()) return
         val last = strokes.removeAt(strokes.lastIndex)
         viewModelScope.launch { repository.deleteStroke(last.id) }
+    }
+
+    /**
+     * Debug-only: export the current canvas per contract `coordinate-mapping` and show
+     * the resulting PNG and its dimensions. Gated at the call site by
+     * `BuildConfig.DEBUG` ([CanvasScreen]).
+     */
+    fun exportPreview() {
+        viewModelScope.launch {
+            val layers = listOf(ExportLayer(z = 0, visible = true, strokes = strokes.toList()))
+            val result = withContext(Dispatchers.Default) {
+                CanvasExporter.export(canvasWidth, canvasHeight, layers)
+            }
+            when (result) {
+                is CanvasExporter.Result.Success -> {
+                    val bmp = withContext(Dispatchers.Default) {
+                        BitmapFactory.decodeByteArray(result.png, 0, result.png.size)
+                    }
+                    exportBitmap = bmp
+                    exportInfo = "${result.export.w} × ${result.export.h} px  " +
+                        "(${result.png.size / 1024} KB)"
+                }
+                is CanvasExporter.Result.TooLarge -> {
+                    exportBitmap = null
+                    exportInfo = result.message
+                }
+            }
+            showExportPreview = true
+        }
+    }
+
+    fun dismissExportPreview() {
+        showExportPreview = false
+        exportBitmap = null
+        exportInfo = null
+    }
+
+    /** Debug-only: toggle the fixture-highlight overlay on the current canvas. */
+    fun toggleFixture() {
+        fixtureVisible = !fixtureVisible
     }
 
     companion object {

@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
+import com.inkwell.contracts.Annotation
+import com.inkwell.render.AnnotationRenderer
 import com.inkwell.render.CanvasTransform
 import com.inkwell.render.EraserHitTest
 import com.inkwell.render.LayerRenderer
@@ -69,6 +71,12 @@ class InkView @JvmOverloads constructor(
 
     private var committed: List<RenderStroke> = emptyList()
 
+    // --- Debug-only agent-annotation overlay (Stage 4 "Render fixture") ---
+    private var canvasWidthCu = 2480
+    private var canvasHeightCu = 3508
+    private var accentColor = AnnotationRenderer.DEFAULT_ACCENT
+    private var debugHighlights: List<Annotation> = emptyList()
+
     private var builder: StrokeBuilder? = null
     private var drawing = false
     private var erasing = false
@@ -94,7 +102,24 @@ class InkView @JvmOverloads constructor(
     private val debugBgPaint = Paint().apply { color = Color.argb(160, 255, 255, 255) }
 
     fun setCanvasSize(widthCu: Int, heightCu: Int) {
+        canvasWidthCu = widthCu
+        canvasHeightCu = heightCu
         renderer.setCanvasSize(widthCu, heightCu)
+        invalidate()
+    }
+
+    /**
+     * Debug-only ("Render fixture"): overlay agent annotations (highlights) drawn
+     * through the same [transform] as ink, so their placement can be eyeballed before
+     * the server exists. Only drawn when [debugEnabled] is true (BuildConfig.DEBUG).
+     */
+    fun setDebugHighlights(annotations: List<Annotation>) {
+        debugHighlights = annotations
+        invalidate()
+    }
+
+    fun setAccentColor(color: Int) {
+        accentColor = color
         invalidate()
     }
 
@@ -122,6 +147,10 @@ class InkView @JvmOverloads constructor(
             liveColor = parseColor(colorHex),
             liveWidthCu = widthCu,
         )
+        if (debugEnabled && debugHighlights.isNotEmpty()) {
+            AnnotationRenderer(accentColor, canvasWidthCu, canvasHeightCu)
+                .draw(canvas, transform, debugHighlights)
+        }
         if (debugEnabled) drawDebugOverlay(canvas)
     }
 
