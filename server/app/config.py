@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,7 +32,25 @@ class Settings(BaseSettings):
     # Worker idle poll interval (seconds) between LISTEN/NOTIFY wakeups.
     worker_poll_seconds: float = 2.0
 
+    # Stage 5 kill-switch (default OFF). When false, a canvas.annotate job fails
+    # immediately with a single "agent disabled" error card. Accepts a bare
+    # ``AGENT_ENABLED`` in addition to the ``INKWELL_``-prefixed form.
+    agent_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AGENT_ENABLED", "INKWELL_AGENT_ENABLED"),
+    )
+
+    # SPEC §10.5 cost control: per-space daily job cap, enforced at claim time.
+    agent_daily_cap: int = 200
+
+    # ADR-0006: non-streaming output cap for the agent call.
+    agent_max_tokens: int = 16000
+
     env: str = "dev"
+
+    # NOTE: ANTHROPIC_API_KEY is intentionally NOT a field here. The anthropic SDK
+    # reads it straight from the process environment on the server; keeping it out of
+    # Settings means it can never be serialised or logged by accident (SPEC §11).
 
 
 @lru_cache

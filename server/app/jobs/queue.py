@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import Card, Job
 from app.jobs.cursor import decode_cursor, encode_cursor
-from app.jobs.handlers import get_handler
+from app.jobs.handlers import JobContext, JobFailure, get_handler, get_job_handler
 from app.logging import get_logger
 
 log = get_logger("jobs")
@@ -130,6 +130,56 @@ def sweep_expired_leases(session: Session) -> int:
     return acted
 
 
+def _run_job_handler(session: Session, job: Job, job_handler) -> bool:
+    """Run a rich job handler (JobContext) and apply its terminal transition."""
+    from app.blobs import get_blob_store
+
+    ctx = JobContext(
+        session=session, job=job, request=job.request or {}, blob_store=get_blob_store()
+    )
+    try:
+        result = job_handler(ctx)
+    except JobFailure as exc:
+        # A handler-signalled failure: exactly one error card with the handler's message.
+        _transition(job, "failed")
+        job.error = str(exc)
+        _clear_lock(job)
+        session.add(
+            Card(
+                job_id=job.id, kind="error", title=exc.title, body=exc.body, anchors=[], actions=[]
+            )
+        )
+        session.commit()
+        return True
+    except Exception as exc:  # unexpected handler error -> failed + generic error card
+        _transition(job, "failed")
+        job.error = str(exc)
+        _clear_lock(job)
+        session.add(
+            Card(
+                job_id=job.id,
+                kind="error",
+                title="Job failed",
+                body=f"The handler raised an error: {exc}",
+                anchors=[],
+                actions=[],
+            )
+        )
+        session.commit()
+        return True
+
+    # Re-read only the cancel flag so pending token/column writes on ``job`` survive.
+    session.refresh(job, attribute_names=["cancel_requested"])
+    if job.cancel_requested:
+        _transition(job, "cancelled")
+    else:
+        job.result = result
+        _transition(job, "done")
+    _clear_lock(job)
+    session.commit()
+    return True
+
+
 def process_one(session: Session, worker_id: str) -> bool:
     """Claim and run a single job. Returns True if a job was processed."""
     job = claim_one(session, worker_id)
@@ -141,6 +191,11 @@ def process_one(session: Session, worker_id: str) -> bool:
         _clear_lock(job)
         session.commit()
         return True
+
+    # Rich job handlers (Stage 5): own token accounting + cards, fail with a specific card.
+    job_handler = get_job_handler(job.type)
+    if job_handler is not None:
+        return _run_job_handler(session, job, job_handler)
 
     handler = get_handler(job.type)
     if handler is None:
