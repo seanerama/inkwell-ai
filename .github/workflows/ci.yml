@@ -62,8 +62,6 @@ jobs:
           packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: android
       - name: Ensure the Gradle wrapper is executable
         run: chmod +x android/gradlew
       - name: Run the committed gate definition (.verity/gates.json)

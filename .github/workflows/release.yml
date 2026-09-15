@@ -41,7 +41,7 @@ jobs:
       # refer to the same bytes). CRITICAL/HIGH vulnerabilities with a fix fail the
       # release; unfixed ones are reported but do not block.
       - name: Trivy scan (fail on fixable CRITICAL/HIGH)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           image-ref: ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}
           format: table
@@ -86,8 +86,6 @@ jobs:
           packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: android
       - name: Decode the signing keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -135,8 +133,6 @@ jobs:
           packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
-        with:
-          build-root-directory: android
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
