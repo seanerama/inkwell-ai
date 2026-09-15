@@ -1,12 +1,13 @@
 {
-  "version": null,
-  "deployed_at": null,
-  "rollback_from": null,
+  "version": "0.0.3",
+  "deployed_at": "2026-09-15T22:20:49Z",
+  "rollback_from": "none — first deploy (no previous digest); rollback = docker compose down in /srv/inkwell/staging",
   "environments": {
     "staging": {
-      "status": "not deployed — blocked on one-time host setup (deploy/host-setup.sh, needs sudo); release v0.0.3 ready",
+      "status": "deployed v0.0.3 by digest; api+worker+postgres up under docker compose; systemd unit installed but not yet enabled (needs sudo systemctl enable inkwell-staging)",
       "url": "https://mini-hp01.taile0ffc4.ts.net:8444",
-      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:b2831b45f8b97ac47a546aabb15506b3baf6ac2667c168d6950165652cd72b84"
+      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:b2831b45f8b97ac47a546aabb15506b3baf6ac2667c168d6950165652cd72b84",
+      "deployed_at": "2026-09-15T22:20:49Z"
     },
     "prod": {
       "status": "not deployed"
