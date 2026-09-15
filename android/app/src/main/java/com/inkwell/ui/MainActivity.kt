@@ -22,7 +22,11 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.inkwell.BuildConfig
 import com.inkwell.data.CanvasRepository
 import com.inkwell.data.InkDatabase
+import com.inkwell.data.LayerRepository
+import com.inkwell.net.AndroidConnectivity
 import com.inkwell.net.EncryptedTokenStore
+import com.inkwell.net.LoopServices
+import com.inkwell.net.SyncWorker
 
 /**
  * Single-Activity host. Launch screen depends on the ink kill-switch
@@ -45,11 +49,30 @@ class MainActivity : ComponentActivity() {
             layerDao = db.layerDao(),
             strokeDao = db.strokeDao(),
         )
-        viewModelFactory { initializer { CanvasViewModel(repo) } }
+        val layerRepo = LayerRepository(db.layerDao())
+        val tokenStore = EncryptedTokenStore(applicationContext)
+        val connectivity = AndroidConnectivity(applicationContext)
+        viewModelFactory {
+            initializer {
+                CanvasViewModel(
+                    repository = repo,
+                    layerRepository = layerRepo,
+                    // Built fresh so it always uses the current pairing (or null if unpaired).
+                    deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
+                    connectivity = connectivity,
+                    offlineQueue = LoopServices.offlineQueue,
+                )
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Register the durable background poll/flush lane (WorkManager) only when the
+        // Send feature is enabled (release stays dark until the follow-up PR flips it).
+        if (BuildConfig.SEND_ENABLED) {
+            SyncWorker.schedulePeriodic(applicationContext)
+        }
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {

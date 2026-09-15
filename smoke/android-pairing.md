@@ -54,9 +54,12 @@ ships a new APK.
 
 ## Kill-switch note
 
-`BuildConfig.PING_ENABLED` gates the **Ping** button. Since v0.0.4 it is **ON in both
-debug and release** until Stage 6 lands (the round-trip is the walking-skeleton
-acceptance on the tablet); Stage 6 turns it OFF in release when Send replaces it.
+`BuildConfig.PING_ENABLED` gates the **Ping** button. **Stage 6 has landed:** it is now
+**ON in debug, OFF in release** — the canvas.annotate loop (Send) replaces the ping
+round-trip as the on-device acceptance. In a **release** build the Ping button is
+absent; pairing **Check** (`/health`) is ungated and still verifies connectivity there.
+Run this ping smoke on a **debug** APK. The loop itself has its own smoke,
+`smoke/loop.md`, gated by `BuildConfig.SEND_ENABLED` (debug ON / release OFF).
 
 ## Results log
 

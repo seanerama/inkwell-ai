@@ -77,6 +77,12 @@ class InkView @JvmOverloads constructor(
     private var accentColor = AnnotationRenderer.DEFAULT_ACCENT
     private var debugHighlights: List<Annotation> = emptyList()
 
+    // --- Agent-annotation layer (Stage 6, release-visible under BuildConfig.SEND_ENABLED).
+    // Rendered through AnnotationRenderer (opacity-authoritative: it paints the 70%), so
+    // the agent LayerEntity stays at 1.0 opacity and the transparency is never doubled.
+    private var agentAnnotations: List<Annotation> = emptyList()
+    private var agentLayerVisible: Boolean = true
+
     private var builder: StrokeBuilder? = null
     private var drawing = false
     private var erasing = false
@@ -123,6 +129,22 @@ class InkView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Set the agent-layer annotations to render (Stage 6). Drawn through
+     * [AnnotationRenderer] whenever the agent layer is visible — in both debug and
+     * release (unlike [setDebugHighlights], which is the debug-only fixture preview).
+     */
+    fun setAgentAnnotations(annotations: List<Annotation>) {
+        agentAnnotations = annotations
+        invalidate()
+    }
+
+    /** Layer-tray visibility toggle for the agent layer (SPEC §6.3 / stage: judge placement). */
+    fun setAgentLayerVisible(visible: Boolean) {
+        agentLayerVisible = visible
+        invalidate()
+    }
+
     fun setCommittedStrokes(strokes: List<RenderStroke>) {
         committed = strokes
         renderer.setCommittedStrokes(strokes)
@@ -147,6 +169,13 @@ class InkView @JvmOverloads constructor(
             liveColor = parseColor(colorHex),
             liveWidthCu = widthCu,
         )
+        // Agent annotation layer (Stage 6): rendered in both debug and release when the
+        // layer is visible, through AnnotationRenderer (which paints the 70% opacity).
+        if (agentLayerVisible && agentAnnotations.isNotEmpty()) {
+            AnnotationRenderer(accentColor, canvasWidthCu, canvasHeightCu)
+                .draw(canvas, transform, agentAnnotations)
+        }
+        // Debug-only fixture preview overlay ("Render fixture", Stage 4).
         if (debugEnabled && debugHighlights.isNotEmpty()) {
             AnnotationRenderer(accentColor, canvasWidthCu, canvasHeightCu)
                 .draw(canvas, transform, debugHighlights)

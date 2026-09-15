@@ -9,15 +9,24 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.inkwell.BuildConfig
 import com.inkwell.contracts.Annotation
 import com.inkwell.data.CanvasRepository
+import com.inkwell.data.LayerRepository
 import com.inkwell.data.StrokeCommitData
 import com.inkwell.ink.StrokeCommit
+import com.inkwell.net.Connectivity
+import com.inkwell.net.DeviceRepository
+import com.inkwell.net.JobResultHandler
+import com.inkwell.net.JobRequestBuilder
+import com.inkwell.net.LoopController
+import com.inkwell.net.OfflineJobQueue
 import com.inkwell.render.AnnotationRenderer
 import com.inkwell.render.CanvasExporter
 import com.inkwell.render.ExportLayer
 import com.inkwell.render.RenderStroke
 import com.inkwell.render.StrokeMapper
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,6 +39,16 @@ import kotlinx.coroutines.withContext
  */
 class CanvasViewModel(
     private val repository: CanvasRepository,
+    // --- Stage 6 loop collaborators (all optional so existing construction/tests hold) ---
+    private val layerRepository: LayerRepository? = null,
+    /** Builds a paired [DeviceRepository], or null when the device is not paired. */
+    private val deviceRepositoryProvider: () -> DeviceRepository? = { null },
+    private val connectivity: Connectivity = Connectivity.AlwaysOnline,
+    /** Shared offline queue (process singleton in production). */
+    private val offlineQueue: OfflineJobQueue = OfflineJobQueue(),
+    /** The kill-switch: Send is only present when this is true (release default OFF). */
+    val sendEnabled: Boolean = BuildConfig.SEND_ENABLED,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     var tool by mutableStateOf("pen")
@@ -49,6 +68,51 @@ class CanvasViewModel(
     val strokes: SnapshotStateList<RenderStroke> = mutableStateListOf()
 
     private var inkLayerId: String? = null
+    private var canvasId: String? = null
+
+    // --- Stage 6: send/poll/render loop state (SPEC §9.4) ---
+
+    /** True while the device has a validated internet connection (SPEC §9.5). */
+    var online by mutableStateOf(connectivity.isOnline())
+        private set
+
+    /** Whether the instruction sheet is showing. */
+    var showInstruction by mutableStateOf(false)
+        private set
+
+    /** The typed instruction (SPEC §9.4 step 1). */
+    var instruction by mutableStateOf("")
+        private set
+
+    /** Non-blocking in-progress indicator — the user keeps drawing (SPEC §9.4 step 4). */
+    var jobInProgress by mutableStateOf(false)
+        private set
+
+    /** Inline send status/error text (offline, too-large, not-paired, failures). */
+    var sendStatus by mutableStateOf<String?>(null)
+        private set
+
+    /** The side-panel content after a terminal job (null until one arrives). */
+    var panel by mutableStateOf<PanelModel?>(null)
+        private set
+
+    /** Annotations currently rendered on the agent layer (highlight this stage). */
+    var agentAnnotations by mutableStateOf<List<Annotation>>(emptyList())
+        private set
+
+    /** Agent-layer visibility toggled from the layer tray. */
+    var agentLayerVisible by mutableStateOf(true)
+        private set
+
+    /** Whether the minimal layer tray is expanded. */
+    var showLayerTray by mutableStateOf(false)
+        private set
+
+    /** Rows for the layer tray (ink + any agent layers). */
+    val layerRows: SnapshotStateList<LayerRow> = mutableStateListOf()
+
+    /** The resolved server `work` space id (looked up by slug, cached per session). */
+    private var workSpaceId: String? = null
 
     // --- Debug-only (BuildConfig.DEBUG) export-preview + fixture-render state ---
     /** Space accent color for agent annotations (SPEC §6.3). */
@@ -72,11 +136,21 @@ class CanvasViewModel(
         viewModelScope.launch {
             val state = repository.openDefaultCanvas()
             inkLayerId = state.inkLayerId
+            canvasId = state.canvasId
             canvasWidth = state.widthCu
             canvasHeight = state.heightCu
             strokes.clear()
             strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
+            refreshLayerRows()
             ready = true
+        }
+        // Observe connectivity so Send disables/enables and a reconnect flushes the queue.
+        viewModelScope.launch {
+            connectivity.online.collect { isOnline ->
+                val was = online
+                online = isOnline
+                if (isOnline && !was) flushOfflineQueue()
+            }
         }
     }
 
@@ -159,8 +233,170 @@ class CanvasViewModel(
         fixtureVisible = !fixtureVisible
     }
 
+    // --- Stage 6: send flow (SPEC §9.4) ---
+
+    fun openInstruction() {
+        if (!sendEnabled) return
+        sendStatus = null
+        showInstruction = true
+    }
+
+    fun dismissInstruction() { showInstruction = false }
+
+    fun onInstructionChange(value: String) { instruction = value }
+
+    /** The feel-test preset (SPEC Phase 1 acceptance). */
+    fun usePreset() { instruction = PRESET_INSTRUCTION }
+
+    /** Layer-tray: toggle the agent layer's visibility so placement can be judged. */
+    fun toggleAgentLayer() {
+        agentLayerVisible = !agentLayerVisible
+        refreshLayerRows()
+    }
+
+    fun toggleLayerTray() { showLayerTray = !showLayerTray }
+
+    /**
+     * Send flow (SPEC §9.4): export the canvas, build the `canvas.annotate` body, then
+     * either enqueue it (offline) or drive the loop to a terminal state and apply the
+     * result. Never locks the UI — the caller keeps drawing while this runs.
+     */
+    fun send() {
+        if (!sendEnabled) return
+        showInstruction = false
+        val cId = canvasId ?: run { sendStatus = "Canvas not ready yet."; return }
+        val dev = deviceRepositoryProvider() ?: run {
+            sendStatus = "Not paired — set the server URL and token in Settings."
+            return
+        }
+        val layerRepo = layerRepository ?: run { sendStatus = "Layer store unavailable."; return }
+        val instr = instruction.ifBlank { PRESET_INSTRUCTION }
+
+        viewModelScope.launch {
+            // 1–2. Export the PNG (contract coordinate-mapping), off the main thread.
+            val exportLayers = listOf(ExportLayer(z = 0, visible = true, strokes = strokes.toList()))
+            val result = withContext(ioDispatcher) {
+                CanvasExporter.export(canvasWidth, canvasHeight, exportLayers)
+            }
+            val (png, export) = when (result) {
+                is CanvasExporter.Result.Success -> result.png to result.export
+                is CanvasExporter.Result.TooLarge -> { sendStatus = result.message; return@launch }
+            }
+
+            // Resolve the seeded work space id (by slug), cached per session.
+            val spaceId = workSpaceId ?: try {
+                dev.workSpaceId()?.also { workSpaceId = it }
+            } catch (e: Exception) {
+                sendStatus = "Could not load spaces: ${e.message ?: e.javaClass.simpleName}"
+                return@launch
+            }
+            if (spaceId == null) { sendStatus = "No 'work' space on the server."; return@launch }
+
+            val request = JobRequestBuilder.build(
+                type = "canvas.annotate",
+                spaceId = spaceId,
+                canvasId = cId,
+                pngBytes = png,
+                export = export,
+                instruction = instr,
+            )
+
+            // 3. Offline: hold the job locally, flushed in order on reconnect (SPEC §9.5).
+            if (!connectivity.isOnline()) {
+                offlineQueue.enqueue(request)
+                sendStatus = "Offline — will send when reconnected."
+                return@launch
+            }
+
+            // 4. Non-blocking indicator on; the user can keep drawing.
+            jobInProgress = true
+            sendStatus = null
+            try {
+                val controller = LoopController(dev, JobResultHandler(layerRepo))
+                val outcome = controller.run(request, cId) { /* queued: indicator already on */ }
+                applyOutcome(outcome)
+            } catch (e: Exception) {
+                sendStatus = "Send failed: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                jobInProgress = false
+            }
+        }
+    }
+
+    /** Apply a terminal [com.inkwell.net.LoopOutcome] to the UI (SPEC §9.4 step 6). */
+    private suspend fun applyOutcome(outcome: com.inkwell.net.LoopOutcome) {
+        if (outcome.isError) {
+            // failed: show the error card body, render NO layer.
+            panel = PanelModel(
+                summary = "",
+                cardTitles = emptyList(),
+                isError = true,
+                errorTitle = outcome.errorTitle,
+                errorBody = outcome.errorBody,
+            )
+            return
+        }
+        // done: render the highlights and open the panel with the summary + card titles.
+        agentAnnotations = outcome.annotations
+        agentLayerVisible = true
+        panel = PanelModel(
+            summary = outcome.summary ?: "",
+            cardTitles = outcome.cardTitles,
+            isError = false,
+        )
+        refreshLayerRows()
+    }
+
+    fun dismissPanel() { panel = null }
+
+    /** Flush offline-created jobs in insertion order when connectivity returns. */
+    private fun flushOfflineQueue() {
+        val dev = deviceRepositoryProvider() ?: return
+        val cId = canvasId ?: return
+        val layerRepo = layerRepository ?: return
+        viewModelScope.launch {
+            try {
+                val handler = JobResultHandler(layerRepo)
+                offlineQueue.flush { pending ->
+                    val queued = dev.submitAgentJob(pending.request)
+                    val terminal = dev.pollUntilTerminal(queued.id, dev.sync(null).cursor)
+                    applyOutcome(handler.handle(terminal, cId))
+                }
+            } catch (e: Exception) {
+                sendStatus = "Reconnect flush failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    /** Rebuild the layer-tray rows from the persisted layers (agent layers appended). */
+    private fun refreshLayerRows() {
+        val layerRepo = layerRepository
+        val cId = canvasId
+        viewModelScope.launch {
+            val rows = mutableListOf<LayerRow>()
+            rows += LayerRow(id = inkLayerId ?: "ink", label = "Ink", owner = "user", visible = true)
+            if (layerRepo != null && cId != null) {
+                layerRepo.layersFor(cId)
+                    .filter { it.owner == "agent" }
+                    .forEach { l ->
+                        rows += LayerRow(
+                            id = l.id,
+                            label = "Agent annotations",
+                            owner = "agent",
+                            visible = agentLayerVisible,
+                        )
+                    }
+            }
+            layerRows.clear()
+            layerRows.addAll(rows)
+        }
+    }
+
     companion object {
         const val DEFAULT_WIDTH_CU = 3f
         val PALETTE = listOf("#111111", "#1B6EF3", "#E5484D")
+
+        /** The feel-test preset instruction (SPEC Phase 1 acceptance / stage). */
+        const val PRESET_INSTRUCTION = "Highlight the most important box"
     }
 }
