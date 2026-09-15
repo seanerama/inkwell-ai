@@ -1,7 +1,9 @@
 name: Release
-# Inkwell AI server release (ADR-0002): on a v* tag, build and push the multi-arch
-# server image to GHCR and create the GitHub Release. The signed Android APK lane is
-# added by Stage 2; Stage 1 ships the server image only.
+# Inkwell AI release (ADR-0002, ADR-0005): on a v* tag, build and push the multi-arch
+# server image to GHCR, create the GitHub Release, build the SIGNED Android APK and
+# attach it to that Release (catalog method gradle-github-releases). The instrumented
+# emulator test also runs here rather than as a fast PR gate (see the android-instrumented
+# job note).
 on:
   push:
     tags:
@@ -44,3 +46,82 @@ jobs:
 
             Image: `ghcr.io/seanerama/inkwell-ai-server:${{ github.ref_name }}`
             (multi-arch: linux/amd64, linux/arm64).
+
+  # Build the signed release APK and attach it to the same GitHub Release
+  # (ADR-0005, catalog method gradle-github-releases). The keystore is decoded from
+  # the ANDROID_KEYSTORE_BASE64 secret at build time and never committed; when the
+  # secret is absent (e.g. a fork) app/build.gradle.kts leaves the build unsigned.
+  android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Set up Gradle (with caching)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: android
+      - name: Decode the signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot produce a signed APK."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+      - name: Build the signed release APK
+        working-directory: android
+        env:
+          INKWELL_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          INKWELL_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          INKWELL_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          INKWELL_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleRelease
+      - name: Attach the signed APK to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: android/app/build/outputs/apk/release/app-release.apk
+
+  # Instrumented emulator smoke (Room opens at v1, pairing screen renders). Run here,
+  # NOT as a .verity/gates.json gate: a cold GitHub-hosted AVD boot + AVD snapshot +
+  # Gradle build reliably exceeds the ~6-minute fast-gate budget, and gates must stay
+  # fast and deterministic (ADR-0028/0029). PRs are guarded by the JVM unit-test and
+  # assembleDebug gates; this lane guards every tagged release.
+  android-instrumented:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Set up Gradle (with caching)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: android
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Run the instrumented test (API 34 emulator)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          working-directory: android
+          script: ./gradlew --no-daemon connectedDebugAndroidTest

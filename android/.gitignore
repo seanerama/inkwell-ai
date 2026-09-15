@@ -1,0 +1,18 @@
+# Android / Gradle build outputs — never commit.
+.gradle/
+build/
+app/build/
+local.properties
+# Node tooling for contract generation (quicktype) — restored via npm ci.
+node_modules/
+# Real signing material never lands here; CI decodes it from secrets at release
+# time (see release.yml). Only keystore.properties.example is committed.
+keystore.properties
+*.jks
+*.keystore
+# IntelliJ / Android Studio
+.idea/
+*.iml
+captures/
+# NOTE: gradle/wrapper/gradle-wrapper.jar IS committed (required to bootstrap
+# the wrapper) and is deliberately not ignored above.
