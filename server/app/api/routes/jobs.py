@@ -6,6 +6,8 @@ types are recognised but return ``422 not_implemented`` until their stages land.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import uuid
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -15,15 +17,19 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_token
 from app.api.errors import ApiError
 from app.api.schemas import JobCreate, JobOut, job_to_out
+from app.blobs import get_blob_store
 from app.db.models import DeviceToken, Job, Space
 from app.jobs import queue
 
 router = APIRouter()
 
-# SPEC §7 job types that will land in later stages.
+MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB decoded (contract coordinate-mapping / device-api)
+
+# SPEC §7 job types implemented as of this stage.
+IMPLEMENTED_JOB_TYPES = {"canvas.annotate"}
+# SPEC §7 job types that will land in later stages (still 422 not_implemented).
 SPEC_JOB_TYPES = {
     "canvas.ask",
-    "canvas.annotate",
     "canvas.formalize",
     "canvas.extract",
     "canvas.action",
@@ -32,6 +38,19 @@ SPEC_JOB_TYPES = {
     "agent.notify",
 }
 INTERNAL_JOB_TYPES = {"system.ping"}
+
+
+def _store_image(image_b64: str) -> str:
+    """Decode, size-check (<=2 MB), and persist the export PNG; return its blob key."""
+    try:
+        data = base64.b64decode(image_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ApiError(422, "validation", "image is not valid base64") from exc
+    if len(data) > MAX_IMAGE_BYTES:
+        raise ApiError(413, "payload_too_large", "export image exceeds 2 MB")
+    key = f"{uuid.uuid4().hex}.png"
+    get_blob_store().put(key, data, "image/png")
+    return key
 
 
 def _resolve_space(db: Session, space_id: uuid.UUID | None) -> Space:
@@ -66,7 +85,7 @@ def create_job(
 
     if body.type in SPEC_JOB_TYPES:
         raise ApiError(422, "not_implemented", f"job type {body.type} is not implemented yet")
-    if body.type not in INTERNAL_JOB_TYPES:
+    if body.type not in IMPLEMENTED_JOB_TYPES and body.type not in INTERNAL_JOB_TYPES:
         raise ApiError(422, "validation", f"unknown job type {body.type}")
 
     space = _resolve_space(db, body.space_id)
@@ -77,6 +96,13 @@ def create_job(
         req["selection"] = body.selection
     if body.export is not None:
         req["export"] = body.export
+
+    # canvas.annotate needs an exported image; persist it to the blob store (ADR-0004)
+    # and carry only its key on the job request (never the base64).
+    if body.type == "canvas.annotate":
+        if not body.image:
+            raise ApiError(422, "validation", "canvas.annotate requires an image")
+        req["image_key"] = _store_image(body.image)
 
     job = queue.enqueue(
         db,

@@ -36,7 +36,8 @@ def test_ping_job_roundtrips_through_worker_and_sync(client, auth):
 
 
 def test_spec_job_type_returns_422_not_implemented(client, auth):
-    resp = client.post("/v1/jobs", json={"type": "canvas.annotate"}, headers=auth)
+    # canvas.annotate is implemented as of Stage 5; the other SPEC types still 422.
+    resp = client.post("/v1/jobs", json={"type": "canvas.formalize"}, headers=auth)
     assert resp.status_code == 422
     assert resp.json()["error"]["code"] == "not_implemented"
 

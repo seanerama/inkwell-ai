@@ -1,7 +1,13 @@
-"""Agent runtime (stub in Stage 1).
+"""Agent runtime (SPEC §10.2-10.4, ADR-0006/0007).
 
-The model call, prompt assembly, structured-output parsing, and two-tier validation
-(SPEC §10.2-10.4, ADR-0006) land in a later stage. The ``anthropic`` SDK is installed
-now but unused. Stage 5 will register the ``canvas.*`` handlers via
-``app.jobs.register_handler``.
+- ``prompt`` assembles the system prompt in the fixed SPEC §10.3 order.
+- ``client`` makes the Anthropic structured-output call.
+- ``validate`` extracts, validates (schema + semantic), and retries once.
+
+``run_agent`` is the entry point used by the ``canvas.annotate`` handler and by later
+job types.
 """
+
+from app.agent.validate import AgentRun, AgentValidationError, run_agent
+
+__all__ = ["run_agent", "AgentRun", "AgentValidationError"]

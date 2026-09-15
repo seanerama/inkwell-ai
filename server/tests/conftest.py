@@ -8,12 +8,15 @@ locally). The schema is built by running Alembic migration 0001 against a clean
 from __future__ import annotations
 
 import os
+import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 os.environ.setdefault("INKWELL_TOKEN_PEPPER", "test-pepper")
+# Keep blobs (canvas.annotate exports) in a writable temp dir during tests.
+os.environ.setdefault("INKWELL_BLOB_DIR", tempfile.mkdtemp(prefix="inkwell-blobs-"))
 
 
 @pytest.fixture(scope="session", autouse=True)
