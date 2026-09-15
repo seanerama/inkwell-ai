@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "name": "Inkwell AI",
+  "slug": "inkwell-ai",
+  "owner": "seanerama",
+  "image_prefix": "ghcr.io/seanerama/inkwell-ai",
+  "locked_at": "2026-09-15T17:39:21.045Z"
+}
