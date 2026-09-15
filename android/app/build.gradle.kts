@@ -52,7 +52,7 @@ android {
     buildTypes {
         getByName("debug") {
             // Kill-switch (Stage 6 dark-launch flag): the Ping button is gated by
-            // BuildConfig.PING_ENABLED. ON in debug, OFF in release until Stage 6.
+            // BuildConfig.PING_ENABLED. ON in debug and release until Stage 6 lands.
             buildConfigField("boolean", "PING_ENABLED", "true")
             // Ink kill-switch (Stage 3 feature flag): default ON in BOTH build types —
             // the app has no purpose with ink off. When OFF the launch screen is the
@@ -60,7 +60,10 @@ android {
             buildConfigField("boolean", "INK_ENABLED", "true")
         }
         getByName("release") {
-            buildConfigField("boolean", "PING_ENABLED", "false")
+            // ON in release until Stage 6 lands (stage-2 spec): the Ping round-trip is
+            // the walking-skeleton acceptance on the physical tablet. Stage 6 turns it
+            // OFF here when Send replaces it.
+            buildConfigField("boolean", "PING_ENABLED", "true")
             buildConfigField("boolean", "INK_ENABLED", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

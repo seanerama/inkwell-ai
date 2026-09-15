@@ -22,6 +22,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ---- runtime ----
 FROM python:3.12-slim AS runtime
+# Version derived from the release tag (release.yml passes INKWELL_VERSION); /v1/health
+# reports it. Local builds get the non-release marker.
+ARG INKWELL_VERSION=0.0.0-dev
+ENV INKWELL_VERSION=${INKWELL_VERSION}
 # Apply Debian security updates on top of the base image: the slim tag lags the
 # security archive (perl-base, gzip, pcre2, sqlite fixes at v0.0.1), and the release
 # Trivy gate fails on fixable CRITICAL/HIGH findings. No new packages are installed.
