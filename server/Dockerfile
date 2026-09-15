@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+# Multi-stage, non-root. Commands: `api` and `worker` (ADR-0002).
+# Built multi-arch (linux/amd64 for mini-hp01, linux/arm64 for later promotion).
+
+# ---- builder: resolve the frozen environment with uv ----
+FROM python:3.12-slim AS builder
+COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+WORKDIR /app
+# Install only production dependencies against the committed lock, no project code yet.
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
+# Now add the project itself.
+COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# ---- runtime ----
+FROM python:3.12-slim AS runtime
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    INKWELL_BLOB_DIR=/data/blobs
+WORKDIR /app
+COPY --from=builder /app /app
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+    && groupadd --system inkwell \
+    && useradd --system --gid inkwell --home-dir /app inkwell \
+    && mkdir -p /data/blobs \
+    && chown -R inkwell:inkwell /app /data
+USER inkwell
+EXPOSE 8000
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["api"]

@@ -1,0 +1,56 @@
+# Inkwell AI compose stack (ADR-0002/0004/0005): api + worker + postgres, one image.
+# The API binds to 127.0.0.1 only; `tailscale serve` provides TLS and the public
+# tailnet name (staging :8444 -> 127.0.0.1:8001, prod :8443 -> 127.0.0.1:8000).
+# Values come from the environment's .env (see .env.example); secrets never live here.
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg://inkwell:${POSTGRES_PASSWORD}@postgres:5432/inkwell
+  INKWELL_TOKEN_PEPPER: ${INKWELL_TOKEN_PEPPER}
+  INKWELL_BLOB_SIGNING_KEY: ${INKWELL_BLOB_SIGNING_KEY}
+  INKWELL_BLOB_DIR: /data/blobs
+  INKWELL_ENV: ${INKWELL_ENV:-staging}
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inkwell
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: inkwell
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inkwell"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  api:
+    image: ghcr.io/seanerama/inkwell-ai-server:${IMAGE_TAG:-latest}
+    command: ["api"]
+    restart: unless-stopped
+    environment: *app-env
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    image: ghcr.io/seanerama/inkwell-ai-server:${IMAGE_TAG:-latest}
+    command: ["worker"]
+    restart: unless-stopped
+    environment: *app-env
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  blobs:

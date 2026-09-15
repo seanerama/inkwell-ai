@@ -3,10 +3,7 @@ name: CI
 # Secret-scan + a structure check, no faked pass. Project gates (lint/test/…)
 # live in ONE committed place — .verity/gates.json — executed by the `gates`
 # job below AND by the Verity local gate runner (stage 82, ADR-0029 §4), so CI
-# can never drift from the gates that were green locally. Until the Architect
-# defines that file (when the stack and walking skeleton land — the
-# progressive gate, framework-spec §3), the gates job FAILS with instructions:
-# a repo with no committed gates must never read green (ADR-0028).
+# can never drift from the gates that were green locally.
 on:
   pull_request:
   push:
@@ -20,16 +17,35 @@ concurrency:
 jobs:
   # Verity single-source gates (stage 82, ADR-0029 §4): this job executes the
   # SAME committed `.verity/gates.json` the local gate runner executes —
-  # ordered, named commands judged by EXIT CODE only (ADR-0028: never through
-  # a pipe, never parsed output). No definition ⇒ the runner FAILS LOUDLY with
-  # instructions — a repo whose gates are missing must never read green (the
-  # issue-#203 defect class, closed by construction). Define your gates in
-  # .verity/gates.json as the stack lands; the runner script is committed at
-  # .verity/run-gates.cjs by the scaffold.
+  # ordered, named commands judged by EXIT CODE only (ADR-0028). The server
+  # gates need `uv` and a real Postgres (the `server-test` and `migration-check`
+  # gates read DATABASE_URL); Docker and Node are preinstalled on the runner for
+  # the `image-build` and `compose-config` gates.
   gates:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: inkwell
+          POSTGRES_PASSWORD: inkwell
+          POSTGRES_DB: inkwell
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U inkwell"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://inkwell:inkwell@localhost:5432/inkwell
+      INKWELL_TOKEN_PEPPER: ci-pepper
     steps:
       - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.x"
       - name: Run the committed gate definition (.verity/gates.json)
         run: node .verity/run-gates.cjs
   structure:
