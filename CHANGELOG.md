@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.4
+
+### Other
+- Enable Ping in release builds; derive the server version from the release tag (#15)
+- STATUS: staging deployed v0.0.3
+- deploy: run the host-side steps from a script file, not bash -s over stdin
+- deploy.sh: start Postgres and wait for it before migrating
+- Release v0.0.3: changelog and runtime truth (staging blocked on host setup, #14)
+
 ## 0.0.3
 
 ### Other
