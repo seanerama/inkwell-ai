@@ -18,6 +18,16 @@ class DeviceRepository(private val api: DeviceApi) {
 
     suspend fun submitPing(): Job = apiCall { api.createJob(JobCreateRequest(type = "system.ping")) }
 
+    /** Submit a pre-built `to_agent` job body (e.g. `canvas.annotate`). */
+    suspend fun submitAgentJob(request: JobCreateRequest): Job = apiCall { api.createJob(request) }
+
+    /**
+     * The seeded `work` space id, looked up by slug (SPEC Phase 1: one hardcoded space).
+     * The slug is stable across deploys; the UUID is not, so we never hardcode the id.
+     * Returns null when the space is not present.
+     */
+    suspend fun workSpaceId(): String? = spaces().firstOrNull { it.slug == "work" }?.id
+
     suspend fun sync(cursor: String?): SyncResponse = apiCall { api.sync(cursor) }
 
     /**

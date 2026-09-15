@@ -51,19 +51,29 @@ android {
 
     buildTypes {
         getByName("debug") {
-            // Kill-switch (Stage 6 dark-launch flag): the Ping button is gated by
-            // BuildConfig.PING_ENABLED. ON in debug and release until Stage 6 lands.
+            // Ping kill-switch (Stage 2): the Ping button is gated by
+            // BuildConfig.PING_ENABLED. Kept ON in debug so the walking-skeleton
+            // round-trip stays available for manual checks alongside Send.
             buildConfigField("boolean", "PING_ENABLED", "true")
+            // Send kill-switch (Stage 6 dark-launch flag, THIS stage's feature): the
+            // canvas.annotate loop (Send button) is gated by BuildConfig.SEND_ENABLED.
+            // ON in debug so the loop is testable; OFF in release until the Handoff
+            // Tester passes the three-box test and a follow-up PR flips it ON.
+            buildConfigField("boolean", "SEND_ENABLED", "true")
             // Ink kill-switch (Stage 3 feature flag): default ON in BOTH build types —
             // the app has no purpose with ink off. When OFF the launch screen is the
             // settings/pairing screen instead of the canvas.
             buildConfigField("boolean", "INK_ENABLED", "true")
         }
         getByName("release") {
-            // ON in release until Stage 6 lands (stage-2 spec): the Ping round-trip is
-            // the walking-skeleton acceptance on the physical tablet. Stage 6 turns it
-            // OFF here when Send replaces it.
-            buildConfigField("boolean", "PING_ENABLED", "true")
+            // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
+            // so PING_ENABLED goes OFF in release (as scheduled in the Stage-2 spec and
+            // PairingScreen's kill-switch note). Pairing "Check" (/health) is ungated
+            // and still verifies connectivity in release.
+            buildConfigField("boolean", "PING_ENABLED", "false")
+            // Send stays dark in release (default OFF) until the Handoff Tester passes
+            // the three-box test; a follow-up PR flips this ON.
+            buildConfigField("boolean", "SEND_ENABLED", "false")
             buildConfigField("boolean", "INK_ENABLED", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -171,6 +181,8 @@ dependencies {
 
     implementation(libs.androidx.security.crypto)
 
+    implementation(libs.androidx.work.runtime.ktx)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.kotlinx.coroutines.test)
@@ -178,6 +190,8 @@ dependencies {
     androidTestImplementation(libs.androidx.test.ext.junit)
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.okhttp.mockwebserver)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
