@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.2
+
+### Other
+- Server image: pass the release Trivy gate
+
 ## 0.0.1
 
 ### Other

@@ -40,14 +40,17 @@ jobs:
       # Scan the image that was actually pushed (by digest, so the scan and the deploy
       # refer to the same bytes). CRITICAL/HIGH vulnerabilities with a fix fail the
       # release; unfixed ones are reported but do not block.
+      # Run Trivy from its pinned image rather than aquasecurity/trivy-action: the
+      # action's installer step (clone trivy main, run contrib/install.sh) failed on
+      # two consecutive release runs. The image is self-contained and deterministic.
       - name: Trivy scan (fail on fixable CRITICAL/HIGH)
-        uses: aquasecurity/trivy-action@v0.33.1
-        with:
-          image-ref: ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: "1"
+        run: |
+          docker run --rm \
+            -v "$RUNNER_TEMP/trivy-cache:/root/.cache/" \
+            aquasec/trivy:0.65.0 image \
+              --severity CRITICAL,HIGH --ignore-unfixed --scanners vuln \
+              --exit-code 1 --format table --skip-version-check \
+              "ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}"
       - name: Write the digest file
         run: |
           echo "ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}" > server-image.digest
