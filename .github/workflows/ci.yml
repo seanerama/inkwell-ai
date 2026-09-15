@@ -55,6 +55,11 @@ jobs:
           java-version: "17"
       - name: Set up the Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The default package set includes the obsolete `tools` package, which no
+          # longer exists in the SDK repository and fails the action. Install only
+          # what the SDK-34 debug build and lint need.
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
         with:
