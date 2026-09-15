@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.6
+
+### Other
+- Stage 6 verification prep: AGENT_ENABLED through compose; debug cleartext for the emulator test; on-demand instrumented workflow
+
 ## 0.0.5
 
 ### Other

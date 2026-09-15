@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.5
-**Deployed at:** 2026-09-15T23:36:06Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:ea9b890f3b89403aa2c7f9e5c02b75d613ebaea1126210368a193b5a63cd6b1b (v0.0.4)
+**Live version:** 0.0.6
+**Deployed at:** 2026-09-15T23:43:27Z
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:30b2b2f65ecfc699eaf579a588394d61152b2c6c76eebc7f2a00e4dafeff62ac (v0.0.5)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.5 by digest; AGENT_ENABLED=true (stage 6 verification); smoke gate passed; systemd enabled. Release lane note: android-instrumented failed on v0.0.5 (test-only cleartext policy, fixed on main, verify via instrumented.yml before v0.0.6)","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:30b2b2f65ecfc699eaf579a588394d61152b2c6c76eebc7f2a00e4dafeff62ac","deployed_at":"2026-09-15T23:36:06Z"}
+- **staging:** {"status":"deployed v0.0.6 by digest; AGENT_ENABLED=true for stage 6 verification; smoke gate passed; all three release lanes green; systemd enabled","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:4a3679129e8e5f89a2af8bc418eec8af8ad8d2a3361d8e9a1eb79c974b20b3b1","deployed_at":"2026-09-15T23:43:28Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
