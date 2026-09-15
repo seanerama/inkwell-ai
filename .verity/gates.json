@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "gates": [
+    { "name": "server-ruff-check",  "command": "cd server && uv run ruff check ." },
+    { "name": "server-ruff-format", "command": "cd server && uv run ruff format --check ." },
+    { "name": "contract-schema",    "command": "cd server && uv run python -m app.contracts check" },
+    { "name": "server-test",        "command": "cd server && uv run pytest -q" },
+    { "name": "migration-check",    "command": "cd server && uv run alembic downgrade base && uv run alembic upgrade head" },
+    { "name": "image-build",        "command": "docker build -t inkwell-ai-server:ci server" },
+    { "name": "compose-config",     "command": "docker compose -f deploy/compose.yml config -q && docker compose -f deploy/compose.test.yml config -q" }
+  ]
+}

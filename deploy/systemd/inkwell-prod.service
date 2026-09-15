@@ -1,0 +1,20 @@
+# Inkwell AI prod stack, managed by systemd via docker compose (ADR-0005).
+# Install: sudo cp deploy/systemd/inkwell-prod.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now inkwell-prod
+[Unit]
+Description=Inkwell AI (prod) compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/inkwell/prod
+EnvironmentFile=/srv/inkwell/prod/.env
+ExecStart=/usr/bin/docker compose -f /srv/inkwell/prod/compose.yml up -d
+ExecStop=/usr/bin/docker compose -f /srv/inkwell/prod/compose.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

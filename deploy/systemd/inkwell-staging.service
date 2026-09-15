@@ -1,0 +1,20 @@
+# Inkwell AI staging stack, managed by systemd via docker compose (ADR-0005).
+# Install: sudo cp deploy/systemd/inkwell-staging.service /etc/systemd/system/
+#          sudo systemctl daemon-reload && sudo systemctl enable --now inkwell-staging
+[Unit]
+Description=Inkwell AI (staging) compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/srv/inkwell/staging
+EnvironmentFile=/srv/inkwell/staging/.env
+ExecStart=/usr/bin/docker compose -f /srv/inkwell/staging/compose.yml up -d
+ExecStop=/usr/bin/docker compose -f /srv/inkwell/staging/compose.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
