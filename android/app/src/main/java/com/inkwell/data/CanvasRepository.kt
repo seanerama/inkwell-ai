@@ -1,0 +1,170 @@
+package com.inkwell.data
+
+import com.inkwell.data.dao.CanvasDao
+import com.inkwell.data.dao.LayerDao
+import com.inkwell.data.dao.SpaceDao
+import com.inkwell.data.dao.StrokeDao
+import com.inkwell.ink.BuiltStroke
+import java.util.UUID
+
+/**
+ * The default canvas and its loaded strokes (Phase 0: one canvas, no server).
+ */
+data class CanvasState(
+    val spaceId: String,
+    val canvasId: String,
+    val inkLayerId: String,
+    val widthCu: Int,
+    val heightCu: Int,
+    val strokes: List<StrokeEntity>,
+)
+
+/**
+ * Device-local persistence for ink (contract `ink-storage`, Room v1 from Stage 2).
+ *
+ * On first launch it creates a default space, a default 2480×3508 canvas, and one
+ * `user`/`ink` layer (SPEC §4.2–4.3: a canvas always has at least one user/ink
+ * layer). Strokes are inserted on pen-up and reloaded when the canvas opens, so ink
+ * survives an app restart. No Room version bump — the frozen v1 schema is reused.
+ */
+class CanvasRepository(
+    private val spaceDao: SpaceDao,
+    private val canvasDao: CanvasDao,
+    private val layerDao: LayerDao,
+    private val strokeDao: StrokeDao,
+    private val idGen: () -> String = { UUID.randomUUID().toString() },
+    private val clock: () -> Long = { System.currentTimeMillis() },
+) {
+
+    /** Ensure the default space/canvas/ink-layer exist, then load the canvas + strokes. */
+    suspend fun openDefaultCanvas(): CanvasState {
+        val space = ensureDefaultSpace()
+        val canvas = ensureDefaultCanvas(space.id)
+        val inkLayer = ensureInkLayer(canvas.id)
+        val strokes = strokeDao.forLayer(inkLayer.id)
+        return CanvasState(
+            spaceId = space.id,
+            canvasId = canvas.id,
+            inkLayerId = inkLayer.id,
+            widthCu = canvas.widthCu,
+            heightCu = canvas.heightCu,
+            strokes = strokes,
+        )
+    }
+
+    suspend fun loadStrokes(layerId: String): List<StrokeEntity> = strokeDao.forLayer(layerId)
+
+    /** Insert one committed stroke on pen-up; returns the persisted entity. */
+    suspend fun insertStroke(
+        layerId: String,
+        commit: StrokeCommitData,
+    ): StrokeEntity {
+        val entity = toStrokeEntity(
+            id = idGen(),
+            layerId = layerId,
+            built = commit.stroke,
+            tool = commit.tool,
+            colorHex = commit.colorHex,
+            widthCu = commit.widthCu,
+            createdAt = clock(),
+        )
+        strokeDao.insert(entity)
+        return entity
+    }
+
+    /** Remove a stroke by id (undo-last-stroke and eraser). */
+    suspend fun deleteStroke(id: String) = strokeDao.deleteById(id)
+
+    private suspend fun ensureDefaultSpace(): SpaceEntity {
+        spaceDao.all().firstOrNull()?.let { return it }
+        val space = SpaceEntity(
+            id = idGen(),
+            name = "Work",
+            slug = "work",
+            systemPrompt = "",
+            tools = emptyList(),
+            model = "claude-sonnet-5",
+            color = "#3B6EA5",
+            position = 0,
+            createdAt = clock(),
+        )
+        spaceDao.upsert(space)
+        return space
+    }
+
+    private suspend fun ensureDefaultCanvas(spaceId: String): CanvasEntity {
+        canvasDao.forSpace(spaceId).firstOrNull()?.let { return it }
+        val now = clock()
+        val canvas = CanvasEntity(
+            id = idGen(),
+            spaceId = spaceId,
+            title = "Canvas",
+            widthCu = DEFAULT_WIDTH_CU,
+            heightCu = DEFAULT_HEIGHT_CU,
+            createdAt = now,
+            updatedAt = now,
+            origin = "user",
+        )
+        canvasDao.upsert(canvas)
+        return canvas
+    }
+
+    private suspend fun ensureInkLayer(canvasId: String): LayerEntity {
+        layerDao.forCanvas(canvasId).firstOrNull { it.owner == "user" && it.type == "ink" }
+            ?.let { return it }
+        val layer = LayerEntity(
+            id = idGen(),
+            canvasId = canvasId,
+            z = 0,
+            owner = "user",
+            type = "ink",
+            visible = true,
+            opacity = 1.0f,
+            jobId = null,
+            createdAt = clock(),
+        )
+        layerDao.upsert(layer)
+        return layer
+    }
+
+    companion object {
+        const val DEFAULT_WIDTH_CU = 2480
+        const val DEFAULT_HEIGHT_CU = 3508
+
+        /**
+         * Pure mapping from a built stroke to a contract `ink-storage` [StrokeEntity].
+         * Points are packed stride-5 little-endian so the invariant
+         * `point_count * 5 * 4 == length(points)` holds by construction.
+         */
+        fun toStrokeEntity(
+            id: String,
+            layerId: String,
+            built: BuiltStroke,
+            tool: String,
+            colorHex: String,
+            widthCu: Float,
+            createdAt: Long,
+        ): StrokeEntity = StrokeEntity(
+            id = id,
+            layerId = layerId,
+            tool = tool,
+            color = colorHex,
+            widthCu = widthCu,
+            points = PackedPoints.encode(built.points),
+            pointCount = built.pointCount,
+            bboxX = built.bboxX,
+            bboxY = built.bboxY,
+            bboxW = built.bboxW,
+            bboxH = built.bboxH,
+            createdAt = createdAt,
+        )
+    }
+}
+
+/** Plain data carried from the capture layer to persistence (mirror of StrokeCommit). */
+data class StrokeCommitData(
+    val stroke: BuiltStroke,
+    val tool: String,
+    val colorHex: String,
+    val widthCu: Float,
+)

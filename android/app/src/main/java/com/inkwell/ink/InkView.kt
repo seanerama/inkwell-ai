@@ -1,0 +1,413 @@
+package com.inkwell.ink
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.util.AttributeSet
+import android.view.MotionEvent
+import android.view.View
+import com.inkwell.render.CanvasTransform
+import com.inkwell.render.EraserHitTest
+import com.inkwell.render.LayerRenderer
+import com.inkwell.render.RenderStroke
+import kotlin.math.hypot
+
+/** A committed stroke handed back to the caller for persistence. */
+data class StrokeCommit(
+    val stroke: BuiltStroke,
+    val tool: String,
+    val colorHex: String,
+    val widthCu: Float,
+)
+
+/** Live debug numbers for the on-screen overlay (debug builds). */
+data class InkDebugStats(
+    val sampleRateHz: Int,
+    val filterLatencyUs: Long,
+    val droppedSamples: Int,
+)
+
+/**
+ * The ink capture surface (SPEC §9.2). A custom [View] handling raw [MotionEvent] —
+ * Compose's `pointerInput` batches and drops samples, which produces visibly
+ * polygonal strokes, so capture lives here.
+ *
+ * Contract of the touch pipeline:
+ *  - iterate `event.historySize` samples and never drop them (§9.2(2));
+ *  - a stylus draws; a finger pans/zooms and is rejected for drawing while a stylus
+ *    is in range (§9.2(3), palm rejection) via [InkInputPolicy];
+ *  - the one-euro filter runs on the live stream in [StrokeBuilder] before commit;
+ *  - the in-progress stroke is a live overlay; committed strokes are cached
+ *    ([LayerRenderer]) and never re-rasterised per frame (§9.2(5)).
+ *
+ * Rendering and the pan/zoom transform are delegated to [LayerRenderer] and
+ * [CanvasTransform] so both the cache and the overlay move together.
+ */
+class InkView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+) : View(context, attrs) {
+
+    // --- Tunable / injected state ---
+    var tool: String = "pen"
+    var colorHex: String = "#111111"
+    var widthCu: Float = LayerRenderer.DEFAULT_WIDTH_CU
+    var minCutoff: Double = OneEuroFilter.DEFAULT_MIN_CUTOFF
+    var beta: Double = OneEuroFilter.DEFAULT_BETA
+    var debugEnabled: Boolean = false
+
+    var onStrokeCommitted: ((StrokeCommit) -> Unit)? = null
+    var onEraseStroke: ((String) -> Unit)? = null
+    var onDebugStats: ((InkDebugStats) -> Unit)? = null
+
+    private val renderer = LayerRenderer()
+    private val transform = CanvasTransform()
+    private val policy = InkInputPolicy()
+    private var hoverStylus = false
+
+    private var committed: List<RenderStroke> = emptyList()
+
+    private var builder: StrokeBuilder? = null
+    private var drawing = false
+    private var erasing = false
+
+    // Two-finger gesture state.
+    private var gestureActive = false
+    private var lastFocusX = 0f
+    private var lastFocusY = 0f
+    private var lastSpan = 0f
+
+    // Debug counters.
+    private var droppedSamples = 0
+    private var windowStartNs = 0L
+    private var windowSamples = 0
+    private var lastSampleRateHz = 0
+    private var lastFilterLatencyUs = 0L
+
+    private val debugPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.RED
+        textSize = 32f
+        isFakeBoldText = true
+    }
+    private val debugBgPaint = Paint().apply { color = Color.argb(160, 255, 255, 255) }
+
+    fun setCanvasSize(widthCu: Int, heightCu: Int) {
+        renderer.setCanvasSize(widthCu, heightCu)
+        invalidate()
+    }
+
+    fun setCommittedStrokes(strokes: List<RenderStroke>) {
+        committed = strokes
+        renderer.setCommittedStrokes(strokes)
+        invalidate()
+    }
+
+    fun setTransform(scale: Float, tx: Float, ty: Float) {
+        transform.scale = scale
+        transform.tx = tx
+        transform.ty = ty
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val live = builder?.takeIf { !it.isEmpty }?.snapshotPoints()
+        renderer.draw(
+            canvas,
+            transform,
+            liveStroke = live,
+            liveTool = tool,
+            liveColor = parseColor(colorHex),
+            liveWidthCu = widthCu,
+        )
+        if (debugEnabled) drawDebugOverlay(canvas)
+    }
+
+    // Hover keeps palm rejection honest: while a stylus hovers, fingers are gestures.
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS ||
+            event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER
+        ) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE ->
+                    hoverStylus = true
+                MotionEvent.ACTION_HOVER_EXIT -> hoverStylus = false
+            }
+            policy.setStylusInRange(hoverStylus)
+        }
+        return super.onGenericMotionEvent(event)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        refreshStylusPresence(event)
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> return onPrimaryDown(event)
+
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                // A second pointer arriving turns finger input into a pan/zoom gesture.
+                if (event.pointerCount >= 2 && bothFingers(event)) {
+                    abortLiveStroke()
+                    beginGesture(event)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                when {
+                    gestureActive -> updateGesture(event)
+                    drawing -> onDrawMove(event)
+                    erasing -> onEraseMove(event)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_POINTER_UP -> {
+                if (gestureActive && event.pointerCount <= 2) endGesture()
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                when {
+                    gestureActive -> endGesture()
+                    drawing -> {
+                        // Capture the final pen-up sample (and any batched history) so
+                        // the stroke ends exactly where the pen lifted, then commit.
+                        builder?.let { addHistoricalAndCurrent(event, it) }
+                        commitStroke()
+                    }
+                    erasing -> erasing = false
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                abortLiveStroke()
+                erasing = false
+                endGesture()
+                return true
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    // --- Down handling ---
+
+    private fun onPrimaryDown(event: MotionEvent): Boolean {
+        val toolType = event.getToolType(0)
+
+        // Reject a finger/palm while a stylus is in range (§9.2(3)).
+        if (toolType == MotionEvent.TOOL_TYPE_FINGER && policy.stylusInRange) {
+            droppedSamples++
+            emitDebugStats()
+            return true
+        }
+
+        // A finger with no stylus present is a candidate for pan (single-finger scroll
+        // is ignored here; pan/zoom needs two fingers). Drawing needs an accepting tool.
+        val isEraserTool = tool == "eraser" || toolType == MotionEvent.TOOL_TYPE_ERASER
+        if (isEraserTool) {
+            erasing = true
+            eraseAt(event.x, event.y)
+            return true
+        }
+
+        if (!policy.acceptsDrawFrom(toolType)) {
+            droppedSamples++
+            emitDebugStats()
+            return true
+        }
+        // Only draw with a stylus, or with a finger when no stylus is around.
+        if (toolType == MotionEvent.TOOL_TYPE_FINGER && policy.stylusInRange) return true
+
+        beginStroke(event)
+        return true
+    }
+
+    // --- Drawing ---
+
+    private fun beginStroke(event: MotionEvent) {
+        val b = StrokeBuilder(minCutoff, beta)
+        b.start(event.eventTime)
+        builder = b
+        drawing = true
+        addHistoricalAndCurrent(event, b)
+        invalidate()
+    }
+
+    private fun onDrawMove(event: MotionEvent) {
+        val b = builder ?: return
+        addHistoricalAndCurrent(event, b)
+        invalidate()
+    }
+
+    /** Iterate ALL historical samples then the current one (§9.2(2)); none dropped. */
+    private fun addHistoricalAndCurrent(event: MotionEvent, b: StrokeBuilder) {
+        val t0 = System.nanoTime()
+        val tiltAxis = MotionEvent.AXIS_TILT
+        for (h in 0 until event.historySize) {
+            b.add(
+                transform.viewToCanvasX(event.getHistoricalX(h)),
+                transform.viewToCanvasY(event.getHistoricalY(h)),
+                event.getHistoricalPressure(h),
+                event.getHistoricalAxisValue(tiltAxis, h),
+                event.getHistoricalEventTime(h),
+            )
+            countSample()
+        }
+        b.add(
+            transform.viewToCanvasX(event.x),
+            transform.viewToCanvasY(event.y),
+            event.pressure,
+            event.getAxisValue(tiltAxis),
+            event.eventTime,
+        )
+        countSample()
+        lastFilterLatencyUs = (System.nanoTime() - t0) / 1000
+        emitDebugStats()
+    }
+
+    private fun commitStroke() {
+        val b = builder
+        drawing = false
+        builder = null
+        val built = b?.build()
+        if (built != null) {
+            onStrokeCommitted?.invoke(StrokeCommit(built, tool, colorHex, widthCu))
+        }
+        invalidate()
+    }
+
+    private fun abortLiveStroke() {
+        drawing = false
+        builder = null
+        invalidate()
+    }
+
+    // --- Erasing ---
+
+    private fun onEraseMove(event: MotionEvent) {
+        for (h in 0 until event.historySize) {
+            eraseAt(event.getHistoricalX(h), event.getHistoricalY(h))
+        }
+        eraseAt(event.x, event.y)
+    }
+
+    private fun eraseAt(viewX: Float, viewY: Float) {
+        val cx = transform.viewToCanvasX(viewX)
+        val cy = transform.viewToCanvasY(viewY)
+        val radius = ERASER_RADIUS_CU
+        // Topmost stroke first (last committed) so erasing feels intuitive.
+        for (i in committed.indices.reversed()) {
+            val s = committed[i]
+            if (EraserHitTest.hits(s.points, s.bboxX, s.bboxY, s.bboxW, s.bboxH, cx, cy, radius + s.widthCu)) {
+                onEraseStroke?.invoke(s.id)
+                return
+            }
+        }
+    }
+
+    // --- Two-finger pan/zoom ---
+
+    private fun bothFingers(event: MotionEvent): Boolean {
+        for (i in 0 until event.pointerCount) {
+            if (event.getToolType(i) == MotionEvent.TOOL_TYPE_STYLUS) return false
+        }
+        return true
+    }
+
+    private fun beginGesture(event: MotionEvent) {
+        gestureActive = true
+        lastFocusX = (event.getX(0) + event.getX(1)) / 2f
+        lastFocusY = (event.getY(0) + event.getY(1)) / 2f
+        lastSpan = spanOf(event)
+    }
+
+    private fun updateGesture(event: MotionEvent) {
+        if (event.pointerCount < 2) return
+        val fx = (event.getX(0) + event.getX(1)) / 2f
+        val fy = (event.getY(0) + event.getY(1)) / 2f
+        val span = spanOf(event)
+
+        transform.panBy(fx - lastFocusX, fy - lastFocusY)
+        if (lastSpan > 0f && span > 0f) {
+            transform.zoomBy(span / lastSpan, fx, fy)
+        }
+        lastFocusX = fx
+        lastFocusY = fy
+        lastSpan = span
+        invalidate()
+    }
+
+    private fun endGesture() {
+        gestureActive = false
+    }
+
+    private fun spanOf(event: MotionEvent): Float {
+        if (event.pointerCount < 2) return 0f
+        return hypot(event.getX(0) - event.getX(1), event.getY(0) - event.getY(1))
+    }
+
+    // --- Stylus presence + debug ---
+
+    private fun refreshStylusPresence(event: MotionEvent) {
+        // Presence is authoritative from the current touch pointers combined with the
+        // last hover state, so it never sticks "true" after the stylus has left.
+        var touchStylus = false
+        for (i in 0 until event.pointerCount) {
+            val t = event.getToolType(i)
+            if (t == MotionEvent.TOOL_TYPE_STYLUS || t == MotionEvent.TOOL_TYPE_ERASER) {
+                touchStylus = true
+            }
+        }
+        policy.setStylusInRange(hoverStylus || touchStylus)
+    }
+
+    private fun countSample() {
+        val now = System.nanoTime()
+        if (windowStartNs == 0L) windowStartNs = now
+        windowSamples++
+        val elapsed = now - windowStartNs
+        if (elapsed >= 1_000_000_000L) {
+            lastSampleRateHz = (windowSamples * 1_000_000_000.0 / elapsed).toInt()
+            windowSamples = 0
+            windowStartNs = now
+        }
+    }
+
+    private fun emitDebugStats() {
+        if (!debugEnabled) return
+        onDebugStats?.invoke(InkDebugStats(lastSampleRateHz, lastFilterLatencyUs, droppedSamples))
+        invalidate()
+    }
+
+    private fun drawDebugOverlay(canvas: Canvas) {
+        val lines = listOf(
+            "sample rate: ${lastSampleRateHz} Hz",
+            "filter latency: ${lastFilterLatencyUs} us",
+            "dropped samples: $droppedSamples",
+        )
+        val pad = 12f
+        val lineH = debugPaint.textSize + 8f
+        val boxH = lineH * lines.size + pad
+        canvas.drawRect(0f, 0f, 360f, boxH, debugBgPaint)
+        var y = pad + debugPaint.textSize
+        for (l in lines) {
+            canvas.drawText(l, pad, y, debugPaint)
+            y += lineH
+        }
+    }
+
+    private fun parseColor(hex: String): Int = try {
+        Color.parseColor(hex)
+    } catch (_: IllegalArgumentException) {
+        Color.BLACK
+    }
+
+    companion object {
+        const val ERASER_RADIUS_CU = 12f
+    }
+}

@@ -54,9 +54,14 @@ android {
             // Kill-switch (Stage 6 dark-launch flag): the Ping button is gated by
             // BuildConfig.PING_ENABLED. ON in debug, OFF in release until Stage 6.
             buildConfigField("boolean", "PING_ENABLED", "true")
+            // Ink kill-switch (Stage 3 feature flag): default ON in BOTH build types —
+            // the app has no purpose with ink off. When OFF the launch screen is the
+            // settings/pairing screen instead of the canvas.
+            buildConfigField("boolean", "INK_ENABLED", "true")
         }
         getByName("release") {
             buildConfigField("boolean", "PING_ENABLED", "false")
+            buildConfigField("boolean", "INK_ENABLED", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {
