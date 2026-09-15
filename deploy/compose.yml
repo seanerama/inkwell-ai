@@ -28,7 +28,7 @@ services:
       retries: 30
 
   api:
-    image: ghcr.io/seanerama/inkwell-ai-server:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REF:-ghcr.io/seanerama/inkwell-ai-server:latest}
     command: ["api"]
     restart: unless-stopped
     environment: *app-env
@@ -41,7 +41,7 @@ services:
         condition: service_healthy
 
   worker:
-    image: ghcr.io/seanerama/inkwell-ai-server:${IMAGE_TAG:-latest}
+    image: ${IMAGE_REF:-ghcr.io/seanerama/inkwell-ai-server:latest}
     command: ["worker"]
     restart: unless-stopped
     environment: *app-env

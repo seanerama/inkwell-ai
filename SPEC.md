@@ -352,7 +352,7 @@ The request payload for `to_agent` types:
   "canvas_id": "uuid",
   "space_id": "uuid",
   "image": "base64 PNG",
-  "export": { "w": 1108, "h": 1568, "width_cu": 2480, "height_cu": 3508 },
+  "export": { "w": 1109, "h": 1568, "width_cu": 2480, "height_cu": 3508 },
   "instruction": "optional user text or selected preset",
   "selection": [0.1, 0.2, 0.5, 0.3]
 }

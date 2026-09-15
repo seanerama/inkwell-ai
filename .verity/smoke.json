@@ -1,0 +1,20 @@
+{
+  "baseUrl": "https://mini-hp01.taile0ffc4.ts.net:8444",
+  "flows": [
+    {
+      "name": "server health answers with the frozen device-api contract",
+      "steps": [
+        { "goto": "/v1/health" },
+        { "expectText": "\"status\":\"ok\"" },
+        { "expectText": "device-api/v1" }
+      ]
+    },
+    {
+      "name": "unauthenticated API access is refused (bearer auth is live)",
+      "steps": [
+        { "goto": "/v1/spaces" },
+        { "expectText": "unauthorized" }
+      ]
+    }
+  ]
+}

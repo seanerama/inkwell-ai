@@ -54,7 +54,7 @@ geometry back to canvas units exactly. Also render the first agent geometry type
 - [ ] Kill-switch / dark-launch flag (default OFF) for this net-new feature:
       the two debug actions are debug-build only; no release-visible surface yet.
 - [ ] UI-smoke "observably-works" check authored for any user-facing surface:
-      `smoke/android-export.md` (debug build: export preview shows 1108×1568 for the
+      `smoke/android-export.md` (debug build: export preview shows 1109×1568 for the
       default canvas; fixture highlight lands where expected).
 - [ ] Additive migration only (no destructive schema change).
 - [ ] Existing suite stays green; CI all-green

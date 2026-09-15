@@ -54,13 +54,14 @@ once Stage 0 emits it from the Pydantic response models (ADR-0007). `Job.result`
   "space_id": "uuid",
   "canvas_id": "uuid",
   "image": "<base64 PNG, decoded size <= 2 MB>",
-  "export": { "w": 1108, "h": 1568, "width_cu": 2480, "height_cu": 3508 },
+  "export": { "w": 1109, "h": 1568, "width_cu": 2480, "height_cu": 3508 },
   "instruction": "optional text",
   "selection": [0.1, 0.2, 0.5, 0.3]
 }
 ```
 
-`image` is persisted to the blob store on receipt; `GET /jobs/{id}` returns
+The example `export` is the default 2480×3508 canvas under the `coordinate-mapping`
+formula (`round(2480 × 1568/3508) = 1109`). `image` is persisted to the blob store on receipt; `GET /jobs/{id}` returns
 `request.image_key` in its place, never the base64 (ADR-0004). `selection` is an
 optional normalized `[x,y,w,h]`.
 
