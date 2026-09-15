@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.3
+
+### Other
+- Release: run Trivy from its pinned image instead of trivy-action
+
 ## 0.0.2
 
 ### Other
