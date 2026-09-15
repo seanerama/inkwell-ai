@@ -51,6 +51,12 @@ interface StrokeDao {
     @Query("SELECT * FROM strokes WHERE layer_id = :layerId ORDER BY created_at")
     suspend fun forLayer(layerId: String): List<StrokeEntity>
 
+    @Query("SELECT * FROM strokes WHERE id = :id")
+    suspend fun byId(id: String): StrokeEntity?
+
+    @Query("DELETE FROM strokes WHERE id = :id")
+    suspend fun deleteById(id: String)
+
     @Query("SELECT COUNT(*) FROM strokes")
     suspend fun count(): Int
 }
