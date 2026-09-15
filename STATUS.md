@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.3
-**Deployed at:** 2026-09-15T22:20:49Z
-**Rollback from:** none — first deploy (no previous digest); rollback = docker compose down in /srv/inkwell/staging
+**Live version:** 0.0.4
+**Deployed at:** 2026-09-15T22:47:20Z
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:b2831b45f8b97ac47a546aabb15506b3baf6ac2667c168d6950165652cd72b84 (v0.0.3; ./deploy/deploy.sh staging <that ref>)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.3 by digest; api+worker+postgres up under docker compose; systemd unit installed but not yet enabled (needs sudo systemctl enable inkwell-staging)","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:b2831b45f8b97ac47a546aabb15506b3baf6ac2667c168d6950165652cd72b84","deployed_at":"2026-09-15T22:20:49Z"}
+- **staging:** {"status":"deployed v0.0.4 by digest; api+worker+postgres up; smoke gate passed on v0.0.3, health re-verified on v0.0.4; systemd unit installed, enable pending (sudo)","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:ea9b890f3b89403aa2c7f9e5c02b75d613ebaea1126210368a193b5a63cd6b1b","deployed_at":"2026-09-15T22:47:20Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
