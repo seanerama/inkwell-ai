@@ -1,0 +1,11 @@
+{
+  "name": "inkwell-ai-android-contracts",
+  "private": true,
+  "description": "Build-time contract tooling for the Inkwell AI Android module. quicktype (ADR-0007) generates agent-output Kotlin types from contracts/schema/agent-output.v1.schema.json. Pinned exactly so CI and local builds agree.",
+  "scripts": {
+    "generate-contracts": "quicktype --lang kotlin --framework kotlinx --package com.inkwell.contracts.generated --src-lang schema --src ../contracts/schema/agent-output.v1.schema.json -o app/build/generated/contracts/kotlin/com/inkwell/contracts/generated/AgentOutputGenerated.kt"
+  },
+  "devDependencies": {
+    "quicktype": "23.0.171"
+  }
+}

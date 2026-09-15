@@ -20,7 +20,9 @@ jobs:
   # ordered, named commands judged by EXIT CODE only (ADR-0028). The server
   # gates need `uv` and a real Postgres (the `server-test` and `migration-check`
   # gates read DATABASE_URL); Docker and Node are preinstalled on the runner for
-  # the `image-build` and `compose-config` gates.
+  # the `image-build` and `compose-config` gates; the Android gates
+  # (`android-lint`/`android-test`/`android-build`, added by Stage 2) need JDK 17,
+  # the Android SDK, and Gradle caching, set up below.
   gates:
     runs-on: ubuntu-latest
     services:
@@ -46,6 +48,19 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.5.x"
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up the Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Set up Gradle (with caching)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: android
+      - name: Ensure the Gradle wrapper is executable
+        run: chmod +x android/gradlew
       - name: Run the committed gate definition (.verity/gates.json)
         run: node .verity/run-gates.cjs
   structure:
