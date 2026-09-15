@@ -24,8 +24,6 @@ ships a new APK.
    - *Expected screenshot A:* the pairing screen — a title "Inkwell AI — Pairing",
      a "Server URL" field, a masked "Device token" field, an outlined **Check**
      button, a filled **Ping** button, and a status line reading `Not paired.`
-     (In a release build the **Ping** button is absent — see Kill-switch below —
-     unless a debug build is being smoked.)
 
 2. **Enter the connection details.**
    - Server URL: `https://mini-hp01.taile0ffc4.ts.net:8444`
@@ -37,7 +35,7 @@ ships a new APK.
      where `<version>` matches the staging `/health` version from the preconditions.
    - Failure looks like `Check failed: ...` — capture it and stop.
 
-4. **Ping round-trip.** (Requires a build where the Ping button is present.)
+4. **Ping round-trip.**
    - Tap **Ping**.
    - *Expected screenshot C (transient):* status shows `Submitting ping...` then
      `Ping queued (<id8>), polling /sync...`. The screen must remain responsive.
@@ -56,7 +54,13 @@ ships a new APK.
 
 ## Kill-switch note
 
-`BuildConfig.PING_ENABLED` gates the **Ping** button: **ON in debug**, **OFF in
-release** (until Stage 6). A release APK therefore shows no Ping button — that is
-expected. To smoke the full round-trip on a release build before Stage 6, use a debug
-APK (`assembleDebug`) or a build with the flag flipped on.
+`BuildConfig.PING_ENABLED` gates the **Ping** button. Since v0.0.4 it is **ON in both
+debug and release** until Stage 6 lands (the round-trip is the walking-skeleton
+acceptance on the tablet); Stage 6 turns it OFF in release when Send replaces it.
+
+## Results log
+
+| Date (UTC) | Release | Operator | A | B | C/D | Notes |
+|---|---|---|---|---|---|---|
+| 2026-09-15 22:35 | v0.0.3 | seanerama | pass | pass (showed 0.0.1: #15) | n/a (Ping OFF in release) | first APK on the tablet |
+| 2026-09-15 22:51 | v0.0.4 | seanerama | pass | pass (0.0.4) | pass — job done in 15 ms, delivered via /sync | walking skeleton proven |
