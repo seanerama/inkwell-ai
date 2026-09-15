@@ -27,6 +27,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push (linux/amd64, linux/arm64)
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: server
@@ -36,16 +37,33 @@ jobs:
           tags: |
             ghcr.io/seanerama/inkwell-ai-server:${{ github.ref_name }}
             ghcr.io/seanerama/inkwell-ai-server:latest
+      # Scan the image that was actually pushed (by digest, so the scan and the deploy
+      # refer to the same bytes). CRITICAL/HIGH vulnerabilities with a fix fail the
+      # release; unfixed ones are reported but do not block.
+      - name: Trivy scan (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+      - name: Write the digest file
+        run: |
+          echo "ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}" > server-image.digest
+          cat server-image.digest
       - name: Create the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
+          files: server-image.digest
           body: |
             Inkwell AI server `${{ github.ref_name }}`.
 
             Image: `ghcr.io/seanerama/inkwell-ai-server:${{ github.ref_name }}`
             (multi-arch: linux/amd64, linux/arm64).
+            Digest (pin this): `ghcr.io/seanerama/inkwell-ai-server@${{ steps.build.outputs.digest }}`
 
   # Build the signed release APK and attach it to the same GitHub Release
   # (ADR-0005, catalog method gradle-github-releases). The keystore is decoded from
@@ -62,6 +80,10 @@ jobs:
           java-version: "17"
       - name: Set up the Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Same as ci.yml: the default package set includes the obsolete `tools`
+          # package and fails the action. Install only what the build needs.
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -107,6 +129,10 @@ jobs:
           java-version: "17"
       - name: Set up the Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Same as ci.yml: the default package set includes the obsolete `tools`
+          # package and fails the action. Install only what the build needs.
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
       - name: Set up Gradle (with caching)
         uses: gradle/actions/setup-gradle@v4
         with:

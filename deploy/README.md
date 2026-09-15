@@ -15,36 +15,33 @@ Secrets live only in each environment's `.env` (mode 600): `POSTGRES_PASSWORD`,
 `INKWELL_TOKEN_PEPPER`, `INKWELL_BLOB_SIGNING_KEY`, `ANTHROPIC_API_KEY`
 (unused until Stage 5). Copy `.env.example` and fill in real values.
 
-## Operator prerequisites (one-time, outside code)
+## One-time host setup (needs sudo; the operator runs it interactively)
 
 ```sh
-sudo usermod -aG docker smahoney        # then re-login
-sudo mkdir -p /srv/inkwell/{staging,prod}
-sudo chown -R smahoney:smahoney /srv/inkwell
+scp deploy/host-setup.sh deploy/systemd/*.service smahoney@mini-hp01.taile0ffc4.ts.net:/tmp/
+ssh -t smahoney@mini-hp01.taile0ffc4.ts.net 'bash /tmp/host-setup.sh'
 ```
 
-## Tailscale serve (TLS + public tailnet name)
+`host-setup.sh` adds the operator to the `docker` group, creates
+`/srv/inkwell/{staging,prod}`, installs the systemd units (boot-time `compose up`
+only), and configures `tailscale serve`: staging `:8444 -> 127.0.0.1:8001`, prod
+`:8443 -> 127.0.0.1:8000`. Port 443 belongs to another service on the host and is
+left alone. Log out and back in afterwards so the group applies, then create each
+environment's `.env` from `.env.example` (mode 600).
 
-Port 443 belongs to another service on the host — do not touch it.
+## Deploying (no sudo)
 
 ```sh
-# staging: https://mini-hp01.taile0ffc4.ts.net:8444  ->  127.0.0.1:8001
-tailscale serve --bg --https=8444 http://127.0.0.1:8001
-
-# prod:    https://mini-hp01.taile0ffc4.ts.net:8443  ->  127.0.0.1:8000
-tailscale serve --bg --https=8443 http://127.0.0.1:8000
+./deploy/deploy.sh staging v0.0.1                                        # by tag
+./deploy/deploy.sh staging ghcr.io/seanerama/inkwell-ai-server@sha256:…  # by digest (preferred)
 ```
 
-The compose stack binds the API to `127.0.0.1:${API_PORT}` (staging `8001`, prod
-`8000`), so only `tailscale serve` exposes it.
+The digest is published on every GitHub Release as the `server-image.digest` asset and
+in the release body. Deploying by digest makes staging and prod byte-identical.
+`deploy.sh` records the previous reference in `.env.previous` on the host and prints
+it, so rollback is re-running `deploy.sh` with that reference (migrations are additive).
 
-## Deploying
-
-```sh
-./deploy/deploy.sh staging v0.0.1     # pull tag -> migrate -> seed -> up -> health poll
-```
-
-Smoke check:
+Smoke check (also `.verity/smoke.json`, run by `verity smoke run`):
 
 ```sh
 curl https://mini-hp01.taile0ffc4.ts.net:8444/v1/health
