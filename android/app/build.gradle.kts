@@ -73,7 +73,9 @@ android {
             buildConfigField("boolean", "PING_ENABLED", "false")
             // Send stays dark in release (default OFF) until the Handoff Tester passes
             // the three-box test; a follow-up PR flips this ON.
-            buildConfigField("boolean", "SEND_ENABLED", "false")
+            // Flipped ON for staging verification by the Release Operator (2026-09-15): the
+            // three-box Handoff test runs on the signed release APK; prod is not promoted.
+            buildConfigField("boolean", "SEND_ENABLED", "true")
             buildConfigField("boolean", "INK_ENABLED", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

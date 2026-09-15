@@ -6,19 +6,20 @@ the real tablet (Lenovo Idea Tab Pro, Android 14) with the active stylus, agains
 Phase 1 acceptance: *draw three boxes, ask the agent to highlight the middle one, and
 the highlight lands on the middle box, with the `summary` shown in a side panel.*
 Browser smoke does not apply to a native client (ADR-0001), so this human pass is the
-replacement. Run it on every debug APK that changes the send/poll/render loop.
+replacement. Run it on every release APK that changes the send/poll/render loop.
 
 ## Kill-switch — which build to test
 
-The loop is gated by `BuildConfig.SEND_ENABLED`: **ON in debug, OFF in release** (the
-release stays dark until this test passes and a follow-up PR flips it ON). So run this
-smoke on a **debug** APK (`assembleDebug`) — a release build shows **no Send button**,
-which is the expected release behaviour, not a failure of this smoke.
+The loop is gated by `BuildConfig.SEND_ENABLED`. Since **v0.0.5** it is **ON in both
+debug and release** so this test runs on the signed release APK from the GitHub
+Release (flipped by the Release Operator for staging verification; prod is not
+promoted). Before v0.0.5 it was release-OFF, which is why the v0.0.4 release APK
+shows no Send button.
 
 ## Preconditions
 
-- A **debug** APK is installed. The ink kill-switch is ON (`BuildConfig.INK_ENABLED`),
-  so the app opens on the **canvas**.
+- The v0.0.5+ release APK is installed. The ink kill-switch is ON
+  (`BuildConfig.INK_ENABLED`), so the app opens on the **canvas**.
 - The tablet is on the tailnet and paired: in **Settings**, the staging server URL and a
   minted device token are set, and **Check** shows
   `Server <version> (device-api/v1)`.
@@ -86,7 +87,7 @@ Record it here for the run under test:
 
 ## Failure signals
 
-- **No Send button:** you are on a release build (SEND_ENABLED OFF) — install a debug APK.
+- **No Send button:** you are on a pre-v0.0.5 release build (SEND_ENABLED OFF) — install v0.0.5 or later.
 - **"Offline":** the tablet lost the tailnet; Send is disabled by design (SPEC §9.5).
   Offline-created jobs are held and flushed in order on reconnect.
 - **Panel shows an error card, no highlight:** the job `failed` (e.g. over the per-space
