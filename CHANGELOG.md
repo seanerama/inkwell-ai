@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.5
+
+### Other
+- Ship v0.0.5: SEND_ENABLED on in release for staging verification; lock stage 6 deps
+- Stage 6: the loop — canvas.annotate end to end with highlight (Phase 1) (#16)
+- smoke: pairing results for v0.0.3/v0.0.4 on the tablet; Ping flag note updated
+- STATUS: staging on v0.0.4
+- CHANGELOG 0.0.4
+
 ## 0.0.4
 
 ### Other

@@ -1,13 +1,13 @@
 {
-  "version": "0.0.4",
-  "deployed_at": "2026-09-15T22:47:20Z",
-  "rollback_from": "ghcr.io/seanerama/inkwell-ai-server@sha256:b2831b45f8b97ac47a546aabb15506b3baf6ac2667c168d6950165652cd72b84 (v0.0.3; ./deploy/deploy.sh staging <that ref>)",
+  "version": "0.0.5",
+  "deployed_at": "2026-09-15T23:36:06Z",
+  "rollback_from": "ghcr.io/seanerama/inkwell-ai-server@sha256:ea9b890f3b89403aa2c7f9e5c02b75d613ebaea1126210368a193b5a63cd6b1b (v0.0.4)",
   "environments": {
     "staging": {
-      "status": "deployed v0.0.4 by digest; api+worker+postgres up; smoke gate passed on v0.0.3, health re-verified on v0.0.4; systemd unit installed, enable pending (sudo)",
+      "status": "deployed v0.0.5 by digest; AGENT_ENABLED=true (stage 6 verification); smoke gate passed; systemd enabled. Release lane note: android-instrumented failed on v0.0.5 (test-only cleartext policy, fixed on main, verify via instrumented.yml before v0.0.6)",
       "url": "https://mini-hp01.taile0ffc4.ts.net:8444",
-      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:ea9b890f3b89403aa2c7f9e5c02b75d613ebaea1126210368a193b5a63cd6b1b",
-      "deployed_at": "2026-09-15T22:47:20Z"
+      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:30b2b2f65ecfc699eaf579a588394d61152b2c6c76eebc7f2a00e4dafeff62ac",
+      "deployed_at": "2026-09-15T23:36:06Z"
     },
     "prod": {
       "status": "not deployed"

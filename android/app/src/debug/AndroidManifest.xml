@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only manifest overlay. The instrumented loop test talks to a MockWebServer on
+     http://localhost, which Android's default network security policy blocks as
+     cleartext. Release builds keep the default (HTTPS only over the tailnet). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:usesCleartextTraffic="true"
+        tools:ignore="UnusedAttribute" />
+</manifest>
