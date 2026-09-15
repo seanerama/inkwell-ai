@@ -59,8 +59,19 @@ else
 fi
 
 docker compose -f compose.yml pull -q
-docker compose -f compose.yml run --rm --no-deps -T api alembic upgrade head
-docker compose -f compose.yml run --rm --no-deps -T api inkwell db seed
+
+# Postgres first, and wait until it accepts connections, so the migration and
+# seed containers can resolve and reach it.
+docker compose -f compose.yml up -d postgres
+for i in $(seq 1 30); do
+  if docker compose -f compose.yml exec -T postgres pg_isready -U "${POSTGRES_USER:-inkwell}" >/dev/null 2>&1; then
+    echo ">> postgres ready"; break
+  fi
+  sleep 2
+done
+
+docker compose -f compose.yml run --rm -T api alembic upgrade head
+docker compose -f compose.yml run --rm -T api inkwell db seed
 docker compose -f compose.yml up -d --remove-orphans
 
 echo ">> polling ${HEALTH_URL}"
