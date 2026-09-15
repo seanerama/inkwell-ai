@@ -3,6 +3,7 @@
 ## 0.0.1
 
 ### Other
+- Release fixes: valid trivy-action tag, drop unsupported setup-gradle input, commit CHANGELOG
 - Ship prep: contract cleanup (#9), release hardening, sudo-free deploy, lockfiles (#13)
 - Stage 5: agent runtime — prompt, structured output, validation, token accounting (#12)
 - Stage 4: canvas export and coordinate mapping (device half of SPEC §5) (#11)

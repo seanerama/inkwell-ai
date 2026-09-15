@@ -22,6 +22,13 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # ---- runtime ----
 FROM python:3.12-slim AS runtime
+# Apply Debian security updates on top of the base image: the slim tag lags the
+# security archive (perl-base, gzip, pcre2, sqlite fixes at v0.0.1), and the release
+# Trivy gate fails on fixable CRITICAL/HIGH findings. No new packages are installed.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
