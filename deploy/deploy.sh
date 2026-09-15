@@ -38,51 +38,10 @@ HEALTH_URL="https://${HOST}:${HEALTH_PORT}/v1/health"
 
 echo ">> deploying ${IMAGE_REF} to ${ENVIRONMENT} (${REMOTE_DIR}) on ${HOST}"
 
-# 1. Ship compose (the .env already exists on the host, created by the operator).
+# 1. Ship compose and the host-side deploy script (the .env already exists on the host).
 scp -q deploy/compose.yml "${USER_AT_HOST}:${REMOTE_DIR}/compose.yml"
+scp -q deploy/remote-deploy.sh "${USER_AT_HOST}:/tmp/inkwell-remote-deploy.sh"
 
-# 2. On the host: record the previous ref, pin the new one, pull, migrate, seed, up, poll.
-ssh "${USER_AT_HOST}" IMAGE_REF="${IMAGE_REF}" REMOTE_DIR="${REMOTE_DIR}" \
-    HEALTH_URL="${HEALTH_URL}" 'bash -s' <<'REMOTE'
-set -euo pipefail
-cd "${REMOTE_DIR}"
-test -f .env || { echo "!! ${REMOTE_DIR}/.env missing — create it from deploy/.env.example" >&2; exit 3; }
-
-PREVIOUS="$(grep -E '^IMAGE_REF=' .env | cut -d= -f2- || true)"
-echo ">> previous ref: ${PREVIOUS:-<none>}"
-[ -n "${PREVIOUS}" ] && echo "IMAGE_REF=${PREVIOUS}" > .env.previous
-
-if grep -qE '^IMAGE_REF=' .env; then
-  sed -i "s|^IMAGE_REF=.*|IMAGE_REF=${IMAGE_REF}|" .env
-else
-  echo "IMAGE_REF=${IMAGE_REF}" >> .env
-fi
-
-docker compose -f compose.yml pull -q
-
-# Postgres first, and wait until it accepts connections, so the migration and
-# seed containers can resolve and reach it.
-docker compose -f compose.yml up -d postgres
-for i in $(seq 1 30); do
-  if docker compose -f compose.yml exec -T postgres pg_isready -U "${POSTGRES_USER:-inkwell}" >/dev/null 2>&1; then
-    echo ">> postgres ready"; break
-  fi
-  sleep 2
-done
-
-docker compose -f compose.yml run --rm -T api alembic upgrade head
-docker compose -f compose.yml run --rm -T api inkwell db seed
-docker compose -f compose.yml up -d --remove-orphans
-
-echo ">> polling ${HEALTH_URL}"
-for i in $(seq 1 30); do
-  if curl -fsS "${HEALTH_URL}" | grep -q '"status":"ok"'; then
-    echo ">> health ok: $(curl -fsS "${HEALTH_URL}")"
-    exit 0
-  fi
-  sleep 2
-done
-echo ">> health check failed; rollback with: deploy.sh <env> ${PREVIOUS:-<previous-ref>}" >&2
-docker compose -f compose.yml logs --tail=50 api
-exit 1
-REMOTE
+# 2. Run it on the host as a file, not via `bash -s` over stdin: docker compose
+#    exec/run read stdin and would swallow the rest of a piped script.
+ssh "${USER_AT_HOST}" bash /tmp/inkwell-remote-deploy.sh "${REMOTE_DIR}" "${IMAGE_REF}" "${HEALTH_URL}"
