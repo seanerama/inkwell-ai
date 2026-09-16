@@ -148,4 +148,4 @@ This diagram scenario deliberately uses **"Mark it up instead"**, which posts
 
 | Date (UTC) | Release | Operator | Scenario 1 (three-box markup) | Notes |
 |---|---|---|---|---|
-| | | | | |
+| 2026-09-16 | v0.0.11 | seanerama | pass ("ok job") | 3-node topology, note "make this topology look better": 7 marks (3 text labels, ellipse "broken link mark", arrow "missing redundancy", rect "star topology"), 2 cards (error: SW1 link broken; fact: single point of failure), 0 clamps, 8547/2354 tokens. The intent was a redraw (`canvas.formalize`, not built yet); annotate marks up in place. |
