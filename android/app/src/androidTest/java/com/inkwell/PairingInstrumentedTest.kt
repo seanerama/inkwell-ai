@@ -38,12 +38,15 @@ class PairingInstrumentedTest {
     }
 
     @Test
-    fun room_database_opens_at_version_1() {
+    fun room_database_opens_at_the_current_version() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val db = Room.inMemoryDatabaseBuilder(context, InkDatabase::class.java).build()
         try {
-            assertEquals(1, db.openHelper.readableDatabase.version)
-            // Exercise a DAO to prove the v1 schema is real and queryable.
+            // v1 (stage 2) -> v2 (stage 10, card state). The 1 -> 2 upgrade path is
+            // covered by InkDatabaseMigrationTest; this proves a fresh open lands on
+            // the current schema.
+            assertEquals(2, db.openHelper.readableDatabase.version)
+            // Exercise a DAO to prove the schema is real and queryable.
             runBlocking { assertEquals(0, db.strokeDao().count()) }
         } finally {
             db.close()
