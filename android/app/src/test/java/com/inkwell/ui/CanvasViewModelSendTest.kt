@@ -11,6 +11,9 @@ import com.inkwell.data.dao.CanvasDao
 import com.inkwell.data.dao.LayerDao
 import com.inkwell.data.dao.SpaceDao
 import com.inkwell.data.dao.StrokeDao
+import com.inkwell.net.CardActionResponse
+import com.inkwell.net.CardResponse
+import com.inkwell.net.CardStateRequest
 import com.inkwell.net.DeviceApi
 import com.inkwell.net.DeviceRepository
 import com.inkwell.net.HealthResponse
@@ -104,15 +107,53 @@ class CanvasViewModelSendTest {
         }
         override suspend fun getJob(id: String): Job = error("unused")
         override suspend fun cancelJob(id: String): Job = error("unused")
+        /** Server cards attached to a done job (Stage 10 additive `cards` field). */
+        val serverCards = listOf(
+            CardResponse(
+                id = "sc1", kind = "answer", title = "1 + 9 = 10", body = "**10**.",
+                anchors = emptyList(),
+                actions = listOf(
+                    CardActionResponse("act-confirm", "Looks right", "confirm"),
+                    CardActionResponse("act-reject", "Not helpful", "reject"),
+                ),
+                state = "open", createdAt = "2026-09-15T00:00:00Z",
+            ),
+        )
         override suspend fun sync(cursor: String?): SyncResponse {
             val last = submitted.lastOrNull() ?: return SyncResponse(emptyList(), "c0")
-            val done = job("job-${submitted.size}", last.type, "done", json.parseToJsonElement(resultJson).jsonObject)
+            val done = job(
+                "job-${submitted.size}", last.type, "done",
+                json.parseToJsonElement(resultJson).jsonObject, serverCards,
+            )
             return SyncResponse(listOf(done), "c1")
         }
+        val patched = mutableListOf<Pair<String, String>>()
+        val actioned = mutableListOf<Pair<String, String>>()
+        override suspend fun patchCard(id: String, body: CardStateRequest): CardResponse {
+            patched += id to body.state
+            return card(id, body.state)
+        }
+        override suspend fun runCardAction(id: String, actionId: String): CardResponse {
+            actioned += id to actionId
+            val state = if (actionId.contains("reject")) "dismissed" else "done"
+            return card(id, state)
+        }
+        private fun card(id: String, state: String) = CardResponse(
+            id = id, kind = "answer", title = "1 + 9 = 10", body = "**10**.",
+            anchors = emptyList(), actions = emptyList(), state = state,
+            createdAt = "2026-09-15T00:00:00Z",
+        )
 
-        private fun job(id: String, type: String, status: String, result: kotlinx.serialization.json.JsonObject?) = Job(
+        private fun job(
+            id: String,
+            type: String,
+            status: String,
+            result: kotlinx.serialization.json.JsonObject?,
+            cards: List<CardResponse> = emptyList(),
+        ) = Job(
             id = id, spaceId = "space-work", canvasId = "canvas-1", direction = "to_agent", type = type,
             status = status, result = result, createdAt = "2026-09-15T00:00:00Z", updatedAt = "2026-09-15T00:00:01Z",
+            cards = cards,
         )
     }
 
@@ -149,7 +190,9 @@ class CanvasViewModelSendTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel(oneTapAsk: Boolean = true): CanvasViewModel {
+    // These tests exercise the Stage-7 one-tap-ask flow, so card actions (the Stage-10
+    // picker) default OFF here; Stage-10 behaviour is covered by its own tests.
+    private fun viewModel(oneTapAsk: Boolean = true, cardActionsEnabled: Boolean = false): CanvasViewModel {
         val layerDao = FakeLayerDao()
         val repo = CanvasRepository(
             spaceDao = FakeSpaceDao(), canvasDao = FakeCanvasDao(), layerDao = layerDao, strokeDao = FakeStrokeDao(),
@@ -161,6 +204,7 @@ class CanvasViewModelSendTest {
             deviceRepositoryProvider = { DeviceRepository(api) },
             sendEnabled = true,
             oneTapAsk = oneTapAsk,
+            cardActionsEnabled = cardActionsEnabled,
             ioDispatcher = dispatcher,
             exporter = fakeExporter,
         ).also { assertTrue("canvas opened synchronously on the unconfined dispatcher", it.ready) }
@@ -277,5 +321,45 @@ class CanvasViewModelSendTest {
         // The text annotation reached the agent layer (rendered, never dropped).
         assertEquals(1, vm.agentAnnotations.size)
         assertTrue(vm.agentLayerVisible)
+    }
+
+    // --- Stage 10 ---
+
+    @Test
+    fun card_actions_enabled_uses_server_cards_with_identity_and_state() {
+        val vm = viewModel(cardActionsEnabled = true)
+        vm.send()
+        val card = vm.panel!!.cards.single()
+        assertEquals("sc1", card.id)
+        assertEquals("open", card.state)
+        assertEquals(2, card.actions.size)
+        assertTrue(card.actions[0].supported) // confirm
+    }
+
+    @Test
+    fun confirm_action_is_optimistic_then_reconciled_from_the_server() {
+        val vm = viewModel(cardActionsEnabled = true)
+        vm.send()
+        val card = vm.panel!!.cards.single()
+        val confirm = card.actions.first { it.kind == "confirm" }
+        vm.onCardAction(card, confirm)
+        // The route was called and the row settled on the server's state.
+        assertEquals(listOf("sc1" to "act-confirm"), api.actioned)
+        assertEquals("done", vm.panel!!.cards.single().state)
+    }
+
+    @Test
+    fun job_type_picker_posts_the_chosen_type() {
+        val vm = viewModel(cardActionsEnabled = true)
+        vm.selectJobType("annotate")
+        assertEquals("Mark up", vm.sendLabel)
+        vm.onSendTapped()
+        assertEquals("canvas.annotate", api.submitted.single().type)
+
+        val vm2 = viewModel(cardActionsEnabled = true)
+        vm2.selectJobType("ask")
+        assertEquals("Send", vm2.sendLabel)
+        vm2.onSendTapped()
+        assertEquals("canvas.ask", api.submitted.last().type)
     }
 }

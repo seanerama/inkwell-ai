@@ -101,6 +101,24 @@ data class StrokeEntity(
     }
 }
 
+/**
+ * Per-card state persisted on the device (Stage 10, contract `ink-storage` v2, additive).
+ * Lets a reopened canvas show done/dismissed cards correctly even offline. Keyed by the
+ * server card [id]; [jobId] groups a job's cards; [updatedAt] is epoch ms of the last
+ * local change. Added by [com.inkwell.data.InkDatabase] MIGRATION_1_2 — strokes and the
+ * v1 tables are untouched.
+ */
+@Entity(
+    tableName = "card_states",
+    indices = [Index("job_id")],
+)
+data class CardStateEntity(
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "job_id") val jobId: String,
+    @ColumnInfo(name = "state") val state: String, // open | done | dismissed
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+)
+
 @Entity(
     tableName = "rasters",
     indices = [Index("layer_id")],

@@ -64,6 +64,13 @@ class InkView @JvmOverloads constructor(
     var onEraseStroke: ((String) -> Unit)? = null
     var onDebugStats: ((InkDebugStats) -> Unit)? = null
 
+    /**
+     * Stage 10 (SPEC §4.7, canvas → card): a light tap on the canvas reports its
+     * canvas-unit position so the panel can scroll to the card whose mark it hits. Fired
+     * only for a short, near-stationary tap; drawing/pan is unaffected.
+     */
+    var onAnchorTap: ((Float, Float) -> Unit)? = null
+
     private val renderer = LayerRenderer()
     private val transform = CanvasTransform()
     private val policy = InkInputPolicy()
@@ -82,6 +89,15 @@ class InkView @JvmOverloads constructor(
     // the agent LayerEntity stays at 1.0 opacity and the transparency is never doubled.
     private var agentAnnotations: List<Annotation> = emptyList()
     private var agentLayerVisible: Boolean = true
+
+    // --- Stage 10: card→canvas anchor pulse (CU rects) + canvas→card tap tracking ---
+    private var anchorPulses: List<DoubleArray> = emptyList()
+    private var downX = 0f
+    private var downY = 0f
+    private var downTime = 0L
+    private val pulsePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
 
     private var builder: StrokeBuilder? = null
     private var drawing = false
@@ -145,6 +161,16 @@ class InkView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Stage 10 (card → canvas, SPEC §4.7): the CU rects `[x,y,w,h]` to pulse as a
+     * transient highlight after a card tap. Empty clears the pulse. Drawn through the
+     * same [transform] as ink so it tracks pan/zoom.
+     */
+    fun setAnchorPulses(rects: List<DoubleArray>) {
+        anchorPulses = rects
+        invalidate()
+    }
+
     fun setCommittedStrokes(strokes: List<RenderStroke>) {
         committed = strokes
         renderer.setCommittedStrokes(strokes)
@@ -174,6 +200,21 @@ class InkView @JvmOverloads constructor(
         if (agentLayerVisible && agentAnnotations.isNotEmpty()) {
             AnnotationRenderer(accentColor, canvasWidthCu, canvasHeightCu)
                 .draw(canvas, transform, agentAnnotations)
+        }
+        // Stage 10: anchor pulse over a tapped card's region(s), through the ink transform.
+        if (anchorPulses.isNotEmpty()) {
+            pulsePaint.color = (accentColor and 0x00FFFFFF) or (0x55 shl 24) // ~33% accent
+            for (rect in anchorPulses) {
+                if (rect.size < 4) continue
+                val left = transform.canvasToViewX(rect[0].toFloat())
+                val top = transform.canvasToViewY(rect[1].toFloat())
+                val right = transform.canvasToViewX((rect[0] + rect[2]).toFloat())
+                val bottom = transform.canvasToViewY((rect[1] + rect[3]).toFloat())
+                val pad = 8f * transform.scale
+                canvas.drawRoundRect(
+                    left - pad, top - pad, right + pad, bottom + pad, 12f, 12f, pulsePaint,
+                )
+            }
         }
         // Debug-only fixture preview overlay ("Render fixture", Stage 4).
         if (debugEnabled && debugHighlights.isNotEmpty()) {
@@ -229,6 +270,11 @@ class InkView @JvmOverloads constructor(
             }
 
             MotionEvent.ACTION_UP -> {
+                // Stage 10: recognise a short, near-stationary tap (before the state is
+                // cleared) so a tap on an agent mark can scroll the panel to its card.
+                val isTap = !gestureActive &&
+                    (event.eventTime - downTime) <= TAP_TIMEOUT_MS &&
+                    hypot((event.x - downX).toDouble(), (event.y - downY).toDouble()) <= TAP_SLOP_PX
                 when {
                     gestureActive -> endGesture()
                     drawing -> {
@@ -238,6 +284,12 @@ class InkView @JvmOverloads constructor(
                         commitStroke()
                     }
                     erasing -> erasing = false
+                }
+                if (isTap && onAnchorTap != null) {
+                    onAnchorTap?.invoke(
+                        transform.viewToCanvasX(event.x),
+                        transform.viewToCanvasY(event.y),
+                    )
                 }
                 return true
             }
@@ -256,6 +308,10 @@ class InkView @JvmOverloads constructor(
 
     private fun onPrimaryDown(event: MotionEvent): Boolean {
         val toolType = event.getToolType(0)
+        // Stage 10: remember the down point so ACTION_UP can recognise a stationary tap.
+        downX = event.x
+        downY = event.y
+        downTime = event.eventTime
 
         // Reject a finger/palm while a stylus is in range (§9.2(3)).
         if (toolType == MotionEvent.TOOL_TYPE_FINGER && policy.stylusInRange) {
@@ -467,5 +523,11 @@ class InkView @JvmOverloads constructor(
 
     companion object {
         const val ERASER_RADIUS_CU = 12f
+
+        /** Max travel (view px) for an ACTION_UP to still count as a tap (Stage 10). */
+        const val TAP_SLOP_PX = 24.0
+
+        /** Max press duration (ms) for a tap (Stage 10). */
+        const val TAP_TIMEOUT_MS = 250L
     }
 }

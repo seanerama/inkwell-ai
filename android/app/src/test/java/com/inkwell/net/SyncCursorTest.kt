@@ -38,6 +38,8 @@ class SyncCursorTest {
             cursorsSent += cursor
             return responses.removeFirst()
         }
+        override suspend fun patchCard(id: String, body: CardStateRequest) = error("unused")
+        override suspend fun runCardAction(id: String, actionId: String) = error("unused")
     }
 
     @Test

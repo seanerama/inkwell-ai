@@ -32,6 +32,19 @@ class JobCreate(BaseModel):
     selection: list[float] | None = None
 
 
+class CardOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    kind: str
+    title: str
+    body: str
+    anchors: list
+    actions: list
+    state: str
+    created_at: datetime
+
+
 class JobOut(BaseModel):
     id: uuid.UUID
     space_id: uuid.UUID
@@ -44,6 +57,7 @@ class JobOut(BaseModel):
     error: str | None
     created_at: datetime
     updated_at: datetime
+    cards: list[CardOut] = []
 
 
 class SyncOut(BaseModel):
@@ -61,6 +75,7 @@ def job_to_out(job) -> JobOut:
     # ADR-0004: never return the base64 image; expose image_key in its place.
     request = dict(job.request or {})
     request.pop("image", None)
+    cards = [CardOut.model_validate(card) for card in sorted(job.cards, key=lambda c: c.created_at)]
     return JobOut(
         id=job.id,
         space_id=job.space_id,
@@ -73,4 +88,5 @@ def job_to_out(job) -> JobOut:
         error=job.error,
         created_at=job.created_at,
         updated_at=job.updated_at,
+        cards=cards,
     )

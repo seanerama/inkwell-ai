@@ -30,6 +30,14 @@ class DeviceRepository(private val api: DeviceApi) {
 
     suspend fun sync(cursor: String?): SyncResponse = apiCall { api.sync(cursor) }
 
+    /** Stage 10: set a card's state (open|done|dismissed); returns the updated card. */
+    suspend fun patchCard(cardId: String, state: String): CardResponse =
+        apiCall { api.patchCard(cardId, CardStateRequest(state = state)) }
+
+    /** Stage 10: invoke a card action by id; returns the updated card. */
+    suspend fun runCardAction(cardId: String, actionId: String): CardResponse =
+        apiCall { api.runCardAction(cardId, actionId) }
+
     /**
      * Poll `/sync` on [pollIntervalMs] cadence until the job with [jobId] is terminal
      * (`done`/`failed`/`cancelled`), starting from [startCursor]. The server cursor is

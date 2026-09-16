@@ -89,3 +89,44 @@ The client sends `X-Inkwell-Contract: device-api/v1`; the server responds with t
 same header. New routes and new optional fields are additive. Removing a field,
 changing a status code, or changing the cursor semantics is a new contract at
 `/v2`, and `/v1` keeps working.
+
+## Additive changes (v1) — 2026-09-16
+
+Stage 10 extends v1 additively (new routes + new optional field only), permitted by the
+"additive only" rule above. Nothing frozen above this heading changes.
+
+**`cards: CardOut[]` on `Job` / `JobOut`.** `GET /jobs/{id}` and `/sync` now carry the
+job's cards, ordered by `created_at` ascending. Older servers omit the field; clients
+default it to `[]`. Each `CardOut` is:
+
+```json
+{
+  "id": "uuid",
+  "kind": "answer|task|fact|question|action|error",
+  "title": "string",
+  "body": "string (Markdown)",
+  "anchors": [ { "annotation_id": "a2" }, { "region": [0.2, 0.4, 0.5, 0.1] } ],
+  "actions": [ { "id": "c1", "label": "Save as task", "kind": "save_to_brain", "payload": {} } ],
+  "state": "open|done|dismissed",
+  "created_at": "timestamp"
+}
+```
+
+`kind`/`state` are strings on the wire so additive vocabulary stays additive. `result`
+is unchanged.
+
+**`PATCH /cards/{id}`** — body `{ "state": "open"|"done"|"dismissed" }` → `CardOut`.
+Allowed transitions are `open ↔ done` and `open ↔ dismissed` (i.e. `open→done`,
+`open→dismissed`, `done→open`, `dismissed→open`); `done ↔ dismissed` directly is
+rejected. `404 not_found` for an unknown id, `409 conflict` for an invalid transition,
+`422 validation` for a missing/invalid `state`.
+
+**`POST /cards/{id}/actions/{action_id}`** → `CardOut`. Finds the action by its `id` in
+the card's `actions`. Effect by the action's `kind`: `confirm` sets the card `done`,
+`reject` sets it `dismissed`; `run_tool`, `open_canvas` and `save_to_brain` return
+`422 not_implemented` until their phases (tools / Phase 4 canvases / Phase 5 brain).
+`404 not_found` if the card or the `action_id` is unknown.
+
+A successful card-state change (either route) **bumps the parent job's `updated_at`**,
+so the job re-appears through `/sync` (which orders by `updated_at`) and the device sees
+the new card state.
