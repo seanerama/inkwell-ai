@@ -1,6 +1,7 @@
 """Job routes (SPEC §8, contract device-api).
 
-Stage 1 accepts the internal ``system.ping`` type; the SPEC ``to_agent``/``to_user``
+Stage 1 accepts the internal ``system.ping`` type; ``canvas.annotate`` (Stage 5) and
+``canvas.ask`` (Stage 7) are implemented; the remaining SPEC ``to_agent``/``to_user``
 types are recognised but return ``422 not_implemented`` until their stages land.
 """
 
@@ -26,10 +27,11 @@ router = APIRouter()
 MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB decoded (contract coordinate-mapping / device-api)
 
 # SPEC §7 job types implemented as of this stage.
-IMPLEMENTED_JOB_TYPES = {"canvas.annotate"}
+IMPLEMENTED_JOB_TYPES = {"canvas.annotate", "canvas.ask"}
+# Implemented types that need an exported canvas image (contract device-api).
+IMAGE_JOB_TYPES = {"canvas.annotate", "canvas.ask"}
 # SPEC §7 job types that will land in later stages (still 422 not_implemented).
 SPEC_JOB_TYPES = {
-    "canvas.ask",
     "canvas.formalize",
     "canvas.extract",
     "canvas.action",
@@ -97,11 +99,11 @@ def create_job(
     if body.export is not None:
         req["export"] = body.export
 
-    # canvas.annotate needs an exported image; persist it to the blob store (ADR-0004)
-    # and carry only its key on the job request (never the base64).
-    if body.type == "canvas.annotate":
+    # canvas.annotate / canvas.ask need an exported image; persist it to the blob store
+    # (ADR-0004) and carry only its key on the job request (never the base64).
+    if body.type in IMAGE_JOB_TYPES:
         if not body.image:
-            raise ApiError(422, "validation", "canvas.annotate requires an image")
+            raise ApiError(422, "validation", f"{body.type} requires an image")
         req["image_key"] = _store_image(body.image)
 
     job = queue.enqueue(

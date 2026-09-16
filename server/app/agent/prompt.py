@@ -71,6 +71,23 @@ _JOB_GUIDANCE: dict[str, str] = {
         "number of precise annotations over many vague ones. If there is nothing worth "
         "marking, return an empty annotations list and say so in the summary."
     ),
+    "canvas.ask": (
+        "Task: read the canvas as a note. If it contains a question, answer it: place a "
+        "short answer as a `text` annotation immediately to the right of or below the "
+        "question (size about 0.02), and add one `answer` card with the full answer in "
+        "Markdown. If it contains a mistake (arithmetic, the spelling of a technical "
+        "term, a wrong date), mark it with an `underline` and explain in a card. If it "
+        "is a plan, list or diagram, give at most one useful observation as a card; "
+        "annotate only when the observation is about a specific place on the page. Do "
+        "nothing decorative. If there is nothing to say, return an empty `annotations` "
+        "list and one short `answer` card."
+    ),
+}
+
+# Default user-turn instruction per job type when the device sends none.
+_DEFAULT_INSTRUCTIONS: dict[str, str] = {
+    "canvas.annotate": "Annotate this canvas.",
+    "canvas.ask": "Read this note and respond.",
 }
 
 
@@ -123,6 +140,4 @@ def build_instruction(instruction: str | None, job_type: str) -> str:
     text = (instruction or "").strip()
     if text:
         return text
-    if job_type == "canvas.annotate":
-        return "Annotate this canvas."
-    return "Analyse this canvas."
+    return _DEFAULT_INSTRUCTIONS.get(job_type, "Analyse this canvas.")
