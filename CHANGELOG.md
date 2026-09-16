@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.11
+
+### Other
+- androidTest: the fresh-open test asserts Room v2 (stage 10 bumped it; migration covered separately)
+- Fix androidTest compile on the v0.0.10 tag; gate androidTest compilation on every PR
+- Release v0.0.10: STATUS staging
+
 ## 0.0.10
 
 ### Other

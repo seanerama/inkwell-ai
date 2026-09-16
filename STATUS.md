@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.10
-**Deployed at:** 2026-09-16T19:05:41Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:a59a2addf654dda7e1c6326054ac8d7c6713258c8a0e60009685b42cb96ef43f (v0.0.9)
+**Live version:** 0.0.11
+**Deployed at:** 2026-09-16T19:29:06Z
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:5ac6373043492dd8f6eb71ae4b2c63c67127aa394143f6799da0a51a67edbf49 (v0.0.10)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.10 by digest (Phase 2: canary, full vocabulary, cards); deploy canary passed live (done, 1 annotation, 1 card); release lane note: android-instrumented failed to COMPILE on the v0.0.10 tag (test sources), fix pending","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:5ac6373043492dd8f6eb71ae4b2c63c67127aa394143f6799da0a51a67edbf49","deployed_at":"2026-09-16T19:05:41Z"}
+- **staging:** {"status":"deployed v0.0.11 by digest (Phase 2 complete: canary, full vocabulary, cards); all three release lanes green; deploy canary passed live; smoke gate passed","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:60747bf2a40cda2b17b38f828271efeb22f1b9042564093bd9ed72ad90f284f4","deployed_at":"2026-09-16T19:29:06Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
