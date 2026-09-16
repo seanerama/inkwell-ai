@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.9
-**Deployed at:** 2026-09-16T17:07:03Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:68817b1d76062999bf737012afb51f55cd0544fb68e476976812b88253203b49 (v0.0.8)
+**Live version:** 0.0.10
+**Deployed at:** 2026-09-16T19:05:41Z
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:a59a2addf654dda7e1c6326054ac8d7c6713258c8a0e60009685b42cb96ef43f (v0.0.9)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.9 by digest; agent on prompt-guided JSON (ADR-0006 amendment); owner's note replayed on the live worker: done, text '= 10' + answer card, 0 clamps; smoke gate passed","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:a59a2addf654dda7e1c6326054ac8d7c6713258c8a0e60009685b42cb96ef43f","deployed_at":"2026-09-16T17:07:03Z"}
+- **staging:** {"status":"deployed v0.0.10 by digest (Phase 2: canary, full vocabulary, cards); deploy canary passed live (done, 1 annotation, 1 card); release lane note: android-instrumented failed to COMPILE on the v0.0.10 tag (test sources), fix pending","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:5ac6373043492dd8f6eb71ae4b2c63c67127aa394143f6799da0a51a67edbf49","deployed_at":"2026-09-16T19:05:41Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)

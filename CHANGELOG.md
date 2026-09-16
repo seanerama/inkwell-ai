@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.10
+
+### Other
+- Stage 10: cards with actions, anchors and Markdown; job-type picker (#26)
+- Stage 9: full annotation vocabulary — diagrams marked up legibly (#25)
+- Stage 8: deploy canary — a live agent job proves every deploy (#24)
+- Plan Phase 2: stages 8 (deploy canary), 9 (full vocabulary), 10 (cards with actions)
+- smoke: ask results (stage 7 accepted on device, v0.0.9)
+- Release v0.0.9: STATUS staging (first successful live agent job)
+
 ## 0.0.9
 
 ### Other
