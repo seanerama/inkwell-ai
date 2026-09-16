@@ -83,5 +83,5 @@ def _ping(request: dict) -> dict:
 
 register_handler("system.ping", _ping)
 
-# Register the Stage 5 canvas.annotate job handler (import for its side effect).
+# Register the canvas.annotate / canvas.ask job handler (import for its side effect).
 from app.jobs import canvas_annotate  # noqa: E402,F401

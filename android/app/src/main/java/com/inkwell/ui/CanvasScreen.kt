@@ -17,8 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -26,6 +30,10 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,12 +49,16 @@ import com.inkwell.ink.InkView
 
 /**
  * The launch surface (SPEC §9.3): a full-bleed ink canvas with a minimal toolbar, plus
- * the Stage 6 canvas.annotate loop — a **Send** button (gated by
- * [BuildConfig.SEND_ENABLED]), a non-blocking in-progress indicator (the user keeps
- * drawing, SPEC §9.4 step 4), a **SidePanel** for the agent `summary` + card titles
- * (right column in landscape, bottom panel in portrait), and a minimal **layer tray**
- * with a per-layer visibility toggle so the agent highlight can be hidden to judge
- * placement. The agent layer renders through [com.inkwell.render.AnnotationRenderer].
+ * the send/poll/render loop — a one-tap **Send** button (gated by
+ * [BuildConfig.SEND_ENABLED]; with [BuildConfig.ONE_TAP_ASK] it posts `canvas.ask`
+ * with no instruction), an **"Add a note…"** icon button that opens the optional note
+ * sheet (which also offers "Mark it up instead" = the Stage-6 `canvas.annotate`), a
+ * non-blocking in-progress indicator (the user keeps drawing, SPEC §9.4 step 4), a
+ * **SidePanel** for the agent `summary` + cards (title + body as plain text; `answer`
+ * cards expanded by default; right column in landscape, bottom panel in portrait), and
+ * a minimal **layer tray** with a per-layer visibility toggle so the agent layer can be
+ * hidden to judge placement. The agent layer renders through
+ * [com.inkwell.render.AnnotationRenderer].
  */
 @Composable
 fun CanvasScreen(
@@ -150,7 +162,8 @@ fun CanvasScreen(
         }
     }
 
-    // Instruction entry (SPEC §9.4 step 1): typed, with the feel-test preset.
+    // Note / instruction entry (SPEC §9.4 step 1): optional note for canvas.ask, or the
+    // Stage-6 annotate sheet when the one-tap kill-switch is OFF.
     if (viewModel.showInstruction) {
         InstructionDialog(viewModel = viewModel)
     }
@@ -165,7 +178,7 @@ fun CanvasScreen(
     }
 }
 
-/** The agent `summary` + card titles, or (on failure) the error card body. */
+/** The agent `summary` + cards (title, body as plain text), or (on failure) the error card body. */
 @Composable
 private fun SidePanel(
     panel: PanelModel,
@@ -202,14 +215,44 @@ private fun SidePanel(
                 )
             } else {
                 Text(text = panel.summary, modifier = Modifier.testTag(CanvasTags.PANEL_SUMMARY))
-                if (panel.cardTitles.isNotEmpty()) {
+                if (panel.cards.isNotEmpty()) {
                     Spacer(Modifier.size(4.dp))
                     Text("Cards", fontWeight = FontWeight.SemiBold)
-                    panel.cardTitles.forEach { title ->
-                        Text(text = "• $title")
+                    panel.cards.forEachIndexed { index, card ->
+                        PanelCardRow(panel = panel, index = index, card = card)
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * One card in the panel: the title row toggles the body. An `answer` card starts
+ * expanded; every other kind starts collapsed to its title. The body is the card's
+ * Markdown shown as plain text (Markdown rendering is Phase 2).
+ */
+@Composable
+private fun PanelCardRow(panel: PanelModel, index: Int, card: PanelCard) {
+    var expanded by remember(panel, index) { mutableStateOf(card.expandedByDefault) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded }
+            .testTag(CanvasTags.panelCard(index)),
+    ) {
+        Text(
+            text = (if (expanded) "▾ " else "▸ ") + card.title,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.testTag(CanvasTags.panelCardTitle(index)),
+        )
+        if (expanded && card.body.isNotBlank()) {
+            Text(
+                text = card.body,
+                modifier = Modifier
+                    .padding(start = 16.dp, top = 2.dp)
+                    .testTag(CanvasTags.panelCardBody(index)),
+            )
         }
     }
 }
@@ -242,24 +285,38 @@ private fun LayerTray(viewModel: CanvasViewModel, modifier: Modifier = Modifier)
     }
 }
 
-/** Typed instruction with the feel-test preset (SPEC §9.4 step 1). */
+/**
+ * The note sheet (SPEC §9.4 step 1). Stage 7 (one-tap ask ON): an optional note sent
+ * with `canvas.ask`, plus **"Mark it up instead"** which sends `canvas.annotate` with the
+ * typed text (or the Stage-6 preset when blank). Kill-switch OFF: the Stage-6 sheet —
+ * typed instruction with the feel-test preset, sent as `canvas.annotate`.
+ */
 @Composable
 private fun InstructionDialog(viewModel: CanvasViewModel) {
+    val oneTap = viewModel.oneTapAsk
     androidx.compose.material3.AlertDialog(
         onDismissRequest = viewModel::dismissInstruction,
-        title = { Text("Send to agent") },
+        title = { Text(if (oneTap) "Add a note" else "Send to agent") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = viewModel.instruction,
                     onValueChange = viewModel::onInstructionChange,
-                    label = { Text("Instruction") },
+                    label = { Text(if (oneTap) "Note for the agent (optional)" else "Instruction") },
                     modifier = Modifier.fillMaxWidth().testTag(CanvasTags.INSTRUCTION_FIELD),
                 )
-                TextButton(
-                    onClick = viewModel::usePreset,
-                    modifier = Modifier.testTag(CanvasTags.INSTRUCTION_PRESET),
-                ) { Text("Preset: \"${CanvasViewModel.PRESET_INSTRUCTION}\"") }
+                if (oneTap) {
+                    TextButton(
+                        onClick = viewModel::sendAnnotate,
+                        enabled = viewModel.online,
+                        modifier = Modifier.testTag(CanvasTags.INSTRUCTION_ANNOTATE),
+                    ) { Text("Mark it up instead") }
+                } else {
+                    TextButton(
+                        onClick = viewModel::usePreset,
+                        modifier = Modifier.testTag(CanvasTags.INSTRUCTION_PRESET),
+                    ) { Text("Preset: \"${CanvasViewModel.PRESET_INSTRUCTION}\"") }
+                }
                 if (!viewModel.online) {
                     Text("Offline — Send is disabled until you reconnect.", color = Color(0xFFB00020))
                 }
@@ -358,15 +415,22 @@ private fun Toolbar(
             ) { Text(if (viewModel.fixtureVisible) "Hide fixture" else "Render fixture") }
         }
 
-        // Send (Stage 6 feature) — present only when the kill-switch is ON; disabled
-        // (with an inline offline state on the instruction sheet) when offline.
+        // Send — present only when the kill-switch is ON; disabled when offline. Stage 7:
+        // one tap posts canvas.ask; the optional note lives behind "Add a note…".
         if (viewModel.sendEnabled) {
             OutlinedButton(
                 onClick = viewModel::toggleLayerTray,
                 modifier = Modifier.testTag(CanvasTags.LAYERS),
             ) { Text("Layers") }
+            if (viewModel.oneTapAsk) {
+                IconButton(
+                    onClick = viewModel::openInstruction,
+                    enabled = viewModel.online,
+                    modifier = Modifier.testTag(CanvasTags.ADD_NOTE),
+                ) { Icon(Icons.Filled.Edit, contentDescription = "Add a note…") }
+            }
             Button(
-                onClick = viewModel::openInstruction,
+                onClick = viewModel::onSendTapped,
                 enabled = viewModel.online,
                 modifier = Modifier.testTag(CanvasTags.SEND),
             ) { Text(if (viewModel.online) "Send" else "Offline") }
@@ -436,5 +500,12 @@ object CanvasTags {
     const val LAYER_TRAY = "canvas_layer_tray"
     const val LAYER_TOGGLE_AGENT = "canvas_layer_toggle_agent"
 
+    // Stage 7 one-tap ask surfaces.
+    const val ADD_NOTE = "canvas_add_note"
+    const val INSTRUCTION_ANNOTATE = "canvas_instruction_annotate"
+
     fun color(index: Int) = "canvas_color_$index"
+    fun panelCard(index: Int) = "canvas_panel_card_$index"
+    fun panelCardTitle(index: Int) = "canvas_panel_card_title_$index"
+    fun panelCardBody(index: Int) = "canvas_panel_card_body_$index"
 }

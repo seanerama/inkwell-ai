@@ -1,4 +1,8 @@
-"""The ``canvas.annotate`` job handler (SPEC §10.2-10.5, Stage 5).
+"""The ``canvas.annotate`` (Stage 5) and ``canvas.ask`` (Stage 7) job handler.
+
+The handler is type-agnostic: it passes ``job.type`` through to ``run_agent``, which
+selects the job guidance, the default instruction and the effort per type (SPEC
+§10.2-10.5). It is registered once per implemented type below.
 
 At run time it: honours the ``AGENT_ENABLED`` kill-switch, enforces the per-space daily
 cap at claim, loads the exported PNG from the blob store, runs the agent with two-tier
@@ -26,6 +30,13 @@ from app.logging import get_logger
 log = get_logger("agent")
 
 CONTRACT_VERSION = "agent-output/v1"
+
+# Error-card wording per job type when the agent's response fails validation twice.
+_FAILURE_TITLES = {"canvas.annotate": "Could not annotate", "canvas.ask": "Could not respond"}
+_FAILURE_BODIES = {
+    "canvas.annotate": "The agent could not produce a valid annotation for this canvas.",
+    "canvas.ask": "The agent could not produce a valid response to this note.",
+}
 
 
 def _daily_count(ctx: JobContext) -> int:
@@ -85,7 +96,7 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
     image_key = ctx.request.get("image_key")
     if not image_key:
         raise JobFailure(
-            "no image for canvas.annotate job",
+            f"no image for {job.type} job",
             title="Job failed",
             body="No exported image was attached to this job.",
         )
@@ -120,8 +131,10 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
         log.warning("agent.failed", job_id=str(job.id), error=str(exc).splitlines()[0])
         raise JobFailure(
             str(exc),
-            title="Could not annotate",
-            body="The agent could not produce a valid annotation for this canvas.",
+            title=_FAILURE_TITLES.get(job.type, "Could not annotate"),
+            body=_FAILURE_BODIES.get(
+                job.type, "The agent could not produce a valid annotation for this canvas."
+            ),
         ) from exc
 
     job.input_tokens = run.input_tokens
@@ -145,3 +158,5 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
 
 
 register_job_handler("canvas.annotate", handle_canvas_annotate)
+# Stage 7: canvas.ask reuses the same type-agnostic handler (job.type drives the prompt).
+register_job_handler("canvas.ask", handle_canvas_annotate)
