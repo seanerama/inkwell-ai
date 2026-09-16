@@ -71,6 +71,16 @@ android {
             // promoted, staging is the only environment, and the server-side
             // AGENT_ENABLED already dark-launches all agent work.
             buildConfigField("boolean", "ONE_TAP_ASK", "true")
+            // Full-vocabulary kill-switch (Stage 9 dark-launch flag, THIS stage's
+            // feature): ON draws all nine agent-output annotation types natively (arrows
+            // with heads, ellipse/rect groupings, strikethrough, path, and margin_notes
+            // in a right-hand gutter); OFF falls back to the Stage-7 behaviour where the
+            // six non-native types render as labelled boxes. Documented exception (same
+            // rationale as ONE_TAP_ASK): default ON in debug AND release, because prod is
+            // not promoted, staging is the only environment, and AGENT_ENABLED already
+            // dark-launches all agent work. Flip to "false" to restore the labelled boxes
+            // without a code change.
+            buildConfigField("boolean", "FULL_VOCABULARY", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -88,6 +98,10 @@ android {
             // block and the stage-7 spec). Flip to "false" to fall back to the Stage-6
             // sheet-first annotate flow without a code change.
             buildConfigField("boolean", "ONE_TAP_ASK", "true")
+            // Stage 9 full vocabulary: ON in release by documented exception (see the
+            // debug block and the stage-9 spec). Flip to "false" to fall back to the
+            // Stage-7 labelled boxes for the six non-native types without a code change.
+            buildConfigField("boolean", "FULL_VOCABULARY", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

@@ -72,6 +72,39 @@ def test_canvas_annotate_end_to_end(client, auth, agent_on, db):
     assert usage["by_space"][str(job.space_id)]["input_tokens"] == 11
 
 
+def test_diagram_response_with_all_nine_types_validates_and_stores(client, auth, agent_on, db):
+    # A recorded diagram markup (the frozen full-vocabulary fixture) with all nine
+    # annotation types round-trips through the canvas.annotate handler (Stage 9).
+    agent_client.set_client(FakeAnthropic(json_payload(fixture("valid-full-vocabulary"))))
+    job_id = _submit(client, auth)
+    _run_worker()
+
+    got = client.get(f"/v1/jobs/{job_id}", headers=auth).json()
+    assert got["status"] == "done"
+    anns = got["result"]["annotations"]
+    assert {a["type"] for a in anns} == {
+        "highlight",
+        "arrow",
+        "ellipse",
+        "rect",
+        "underline",
+        "strikethrough",
+        "path",
+        "text",
+        "margin_note",
+    }
+    # The arrow keeps its relationship label and endpoints (diagram markup).
+    arrow = next(a for a in anns if a["type"] == "arrow")
+    assert arrow["label"] == "blocks"
+    assert arrow["from"] == [0.20, 0.40] and arrow["to"] == [0.70, 0.50]
+    # The margin note keeps its down-the-page position.
+    note = next(a for a in anns if a["type"] == "margin_note")
+    assert note["y"] == 0.35
+    # Nothing was clamped — all coordinates were already in-range.
+    job = db.get(Job, job_id)
+    assert job.coordinate_clamps == 0
+
+
 def test_usage_zero_on_fresh(client, auth):
     usage = client.get("/v1/usage", headers=auth).json()
     assert usage == {"jobs": 0, "input_tokens": 0, "output_tokens": 0, "by_space": {}}

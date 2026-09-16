@@ -124,4 +124,106 @@ class AnnotationGeometryTest {
         val a9 = fixture.single { it.id == "a9" }
         assertEquals("margin_note", AnnotationGeometry.fallbackLabel(a9))
     }
+
+    // --- Stage 9: full-vocabulary geometry ---
+
+    @Test
+    fun arrow_head_triangle_is_exact_for_a_horizontal_arrow() {
+        // A left→right horizontal arrow so the head vertices come out clean.
+        val head = AnnotationGeometry.arrowHeadCu(
+            from = listOf(0.0, 0.5),
+            to = listOf(0.5, 0.5),
+            headLenCu = 18.0,
+            widthCu = w,
+            heightCu = h,
+        )
+        // Tip at `to`.
+        assertEquals(0.5 * w, head.tip.first, 1e-9) // 1240.0
+        assertEquals(0.5 * h, head.tip.second, 1e-9) // 1754.0
+        // Base is 18 CU back along the shaft; half-width 9 CU either side (perp = ±y).
+        assertEquals(1240.0 - 18.0, head.left.first, 1e-9) // 1222.0
+        assertEquals(1754.0 + 9.0, head.left.second, 1e-9) // 1763.0
+        assertEquals(1240.0 - 18.0, head.right.first, 1e-9) // 1222.0
+        assertEquals(1754.0 - 9.0, head.right.second, 1e-9) // 1745.0
+    }
+
+    @Test
+    fun arrow_head_tip_is_always_the_arrow_to_point() {
+        // Fixture a2: from [0.20,0.40] to [0.70,0.50] — the tip lands exactly at `to`.
+        val a2 = fixture.filterIsInstance<Arrow>().single { it.id == "a2" }
+        val head = AnnotationGeometry.arrowHeadCu(a2.from, a2.to, widthCu = w, heightCu = h)
+        assertEquals(0.70 * w, head.tip.first, 1e-9)
+        assertEquals(0.50 * h, head.tip.second, 1e-9)
+    }
+
+    @Test
+    fun degenerate_arrow_head_collapses_to_the_point() {
+        val head = AnnotationGeometry.arrowHeadCu(listOf(0.3, 0.3), listOf(0.3, 0.3), widthCu = w, heightCu = h)
+        assertEquals(head.tip, head.left)
+        assertEquals(head.tip, head.right)
+    }
+
+    @Test
+    fun arrow_label_anchor_is_the_midpoint_offset_perpendicular() {
+        // Horizontal arrow: midpoint (620, 1754); offset 24 CU "above" (−y).
+        val anchor = AnnotationGeometry.arrowLabelAnchorCu(
+            from = listOf(0.0, 0.5),
+            to = listOf(0.5, 0.5),
+            offsetCu = 24.0,
+            widthCu = w,
+            heightCu = h,
+        )
+        assertEquals(0.25 * w, anchor.first, 1e-9) // 620.0
+        assertEquals(1754.0 - 24.0, anchor.second, 1e-9) // 1730.0
+    }
+
+    @Test
+    fun rect_label_anchor_is_the_top_left_corner() {
+        // Fixture a4: rect x 0.10, y 0.10.
+        val a4 = fixture.filterIsInstance<RectAnnotation>().single { it.id == "a4" }
+        val anchor = AnnotationGeometry.rectLabelAnchorCu(a4, w, h)
+        assertEquals(0.10 * w, anchor.first, 1e-9) // 248.0
+        assertEquals(0.10 * h, anchor.second, 1e-9) // 350.8
+    }
+
+    @Test
+    fun margin_notes_within_two_hundredths_stack_without_overlapping() {
+        val lineHeight = 60.0
+        // Three notes within 0.02 of each other in unsorted order.
+        val ys = listOf(0.35, 0.36, 0.355)
+        val tops = AnnotationGeometry.stackMarginNotesCu(ys, lineHeight, h)
+        assertEquals(3, tops.size)
+        // The first note keeps its requested y; the returned list is in INPUT order.
+        assertEquals(0.35 * h, tops[0], 1e-9)
+        // Sorted top-to-bottom, consecutive notes never sit closer than one line height.
+        val sorted = tops.sorted()
+        for (i in 1 until sorted.size) {
+            assertTrue(
+                "notes overlap: ${sorted[i - 1]} then ${sorted[i]}",
+                sorted[i] - sorted[i - 1] >= lineHeight - 1e-9,
+            )
+        }
+    }
+
+    @Test
+    fun text_wrap_width_is_thirty_five_percent_of_width_cu() {
+        assertEquals(0.35 * w, AnnotationGeometry.textWrapWidthCu(w), 1e-9) // 868.0
+        assertEquals(0.18 * w, AnnotationGeometry.marginGutterWidthCu(w), 1e-9) // 446.4
+    }
+
+    @Test
+    fun wrap_words_breaks_greedily_on_a_pure_measure() {
+        val lines = AnnotationGeometry.wrapWords("This contradicts p.2", 120.0) { it.length * 10.0 }
+        assertEquals(listOf("This", "contradicts", "p.2"), lines)
+    }
+
+    @Test
+    fun full_vocabulary_fixture_renders_with_zero_fallbacks_when_the_flag_is_on() {
+        // Pure mirror of the renderer's routing (the flag itself lives in
+        // AnnotationRenderer; here we assert against the native-type sets).
+        assertEquals(9, fixture.size)
+        assertEquals(0, AnnotationGeometry.fallbackCountFor(fixture, AnnotationGeometry.FULL_NATIVE_TYPES))
+        // With the kill-switch OFF, the six non-native types fall back.
+        assertEquals(6, AnnotationGeometry.fallbackCountFor(fixture, AnnotationGeometry.STAGE7_NATIVE_TYPES))
+    }
 }

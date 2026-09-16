@@ -57,6 +57,20 @@ def test_brain_delimiter_marks_data_notice():
     assert prompt.BRAIN_CONTEXT_OPEN in p and prompt.BRAIN_CONTEXT_CLOSE in p
 
 
+def test_annotate_guidance_has_diagram_vocabulary():
+    p = prompt.build_system_prompt(job_type="canvas.annotate")
+    # The exact substring an existing test (test_canvas_ask) also depends on.
+    assert "Task: annotate the canvas." in p
+    # Stage 9 diagram-quality markup guidance.
+    assert "arrow" in p and "margin_note" in p
+    assert "depends on" in p and "blocks" in p
+    assert "4 words or fewer" in p
+    assert "3-8 precise marks" in p
+    # The schema description now spells out each type's fields + coordinate meaning.
+    assert "rx/ry are radii" in p
+    assert "right-hand margin gutter" in p
+
+
 def test_effort_per_job_type():
     assert client.effort_for("canvas.annotate") == "medium"
     assert client.effort_for("canvas.ask") == "low"
