@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.8
+
+### Other
+- [stage 7] One-tap send: canvas.ask answers the note without an instruction (#20)
+- Plan stage 7: one-tap send, canvas.ask answers the note (#17 -> #19)
+- Release v0.0.7: STATUS staging
+
 ## 0.0.7
 
 ### Other
