@@ -28,6 +28,9 @@ class DeviceRepository(private val api: DeviceApi) {
      */
     suspend fun workSpaceId(): String? = spaces().firstOrNull { it.slug == "work" }?.id
 
+    /** One job by id (contract device-api `GET /jobs/{id}`). */
+    suspend fun getJob(id: String): Job = apiCall { api.getJob(id) }
+
     suspend fun sync(cursor: String?): SyncResponse = apiCall { api.sync(cursor) }
 
     /** Stage 10: set a card's state (open|done|dismissed); returns the updated card. */

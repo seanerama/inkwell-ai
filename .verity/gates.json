@@ -11,6 +11,7 @@
     { "name": "compose-config",     "command": "docker compose -f deploy/compose.yml config -q && docker compose -f deploy/compose.test.yml config -q" },
     { "name": "android-lint",       "command": "cd android && ./gradlew --no-daemon lint" },
     { "name": "android-test",       "command": "cd android && ./gradlew --no-daemon testDebugUnitTest" },
-    { "name": "android-build",      "command": "cd android && ./gradlew --no-daemon assembleDebug" }
+    { "name": "android-build",      "command": "cd android && ./gradlew --no-daemon assembleDebug" },
+    { "name": "android-test-compile", "command": "cd android && ./gradlew --no-daemon compileDebugAndroidTestKotlin" }
   ]
 }
