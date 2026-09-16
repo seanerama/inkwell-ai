@@ -43,7 +43,9 @@ def _clean():
 
     sm = get_sessionmaker()
     with sm() as session:
-        session.execute(text("TRUNCATE cards, jobs, device_tokens RESTART IDENTITY CASCADE"))
+        session.execute(
+            text("TRUNCATE cards, jobs, canvases, device_tokens RESTART IDENTITY CASCADE")
+        )
         session.commit()
         seed_default_spaces(session)
     app.state.rate_limiter.reset()

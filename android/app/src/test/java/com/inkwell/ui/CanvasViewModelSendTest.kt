@@ -218,7 +218,11 @@ class CanvasViewModelSendTest {
 
     // These tests exercise the Stage-7 one-tap-ask flow, so card actions (the Stage-10
     // picker) default OFF here; Stage-10 behaviour is covered by its own tests.
-    private fun viewModel(oneTapAsk: Boolean = true, cardActionsEnabled: Boolean = false): CanvasViewModel {
+    private fun viewModel(
+        oneTapAsk: Boolean = true,
+        cardActionsEnabled: Boolean = false,
+        formalizeEnabled: Boolean = false,
+    ): CanvasViewModel {
         val layerDao = FakeLayerDao()
         val repo = CanvasRepository(
             spaceDao = FakeSpaceDao(), canvasDao = FakeCanvasDao(), layerDao = layerDao, strokeDao = FakeStrokeDao(),
@@ -231,6 +235,8 @@ class CanvasViewModelSendTest {
             sendEnabled = true,
             oneTapAsk = oneTapAsk,
             cardActionsEnabled = cardActionsEnabled,
+            formalizeEnabled = formalizeEnabled,
+            formalizedCanvasStore = repo,
             ioDispatcher = dispatcher,
             exporter = fakeExporter,
         ).also { assertTrue("canvas opened synchronously on the unconfined dispatcher", it.ready) }
@@ -387,5 +393,36 @@ class CanvasViewModelSendTest {
         assertEquals("Send", vm2.sendLabel)
         vm2.onSendTapped()
         assertEquals("canvas.ask", api.submitted.last().type)
+    }
+
+    // --- Stage 12: Formalize picker ---
+
+    @Test
+    fun formalize_option_is_gated_by_its_flag() {
+        // OFF: selecting formalize is ignored (option not offered).
+        val off = viewModel(cardActionsEnabled = true, formalizeEnabled = false)
+        off.selectJobType("formalize")
+        assertEquals("ask", off.jobType)
+
+        // ON: selectable, and the Send label follows it.
+        val on = viewModel(cardActionsEnabled = true, formalizeEnabled = true)
+        on.selectJobType("formalize")
+        assertEquals("formalize", on.jobType)
+        assertEquals("Formalize", on.sendLabel)
+    }
+
+    @Test
+    fun formalize_posts_canvas_formalize_with_the_canvas_title_as_meta_title() {
+        val vm = viewModel(cardActionsEnabled = true, formalizeEnabled = true)
+        vm.selectJobType("formalize")
+        vm.onSendTapped()
+
+        val req = api.submitted.single()
+        assertEquals("canvas.formalize", req.type)
+        // meta.title carries the current canvas title (the seeded default "Canvas").
+        val body = wireBody(req)
+        assertEquals("Canvas", body["meta"]!!.jsonObject["title"]!!.jsonPrimitive.content)
+        // No instruction for formalize (the guidance drives it).
+        assertNull(req.instruction)
     }
 }

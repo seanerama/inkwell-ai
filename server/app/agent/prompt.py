@@ -111,12 +111,22 @@ _JOB_GUIDANCE: dict[str, str] = {
         "nothing decorative. If there is nothing to say, return an empty `annotations` "
         "list and one short `answer` card."
     ),
+    "canvas.formalize": (
+        "Task: redraw the sketch as a clean diagram on a blank page of the same size. "
+        "Use `rect` for boxes (aligned to a grid, equal sizes for peers), `arrow` with "
+        "`label` for connections, `text` for every legible label, `ellipse` for "
+        "cloud/external nodes, `path` only for shapes that fit nothing else. Preserve "
+        "the sketch's layout and relative positions; straighten, align and space "
+        "evenly. Do not critique; no cards except one `answer` card summarising what "
+        "was cleaned up. Coordinates are relative to the same page bounds."
+    ),
 }
 
 # Default user-turn instruction per job type when the device sends none.
 _DEFAULT_INSTRUCTIONS: dict[str, str] = {
     "canvas.annotate": "Annotate this canvas.",
     "canvas.ask": "Read this note and respond.",
+    "canvas.formalize": "Formalize this canvas.",
 }
 
 

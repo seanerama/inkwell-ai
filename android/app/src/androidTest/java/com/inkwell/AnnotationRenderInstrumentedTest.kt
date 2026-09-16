@@ -97,6 +97,49 @@ class AnnotationRenderInstrumentedTest {
         assertTrue("maxY $maxY vs $expMaxY", abs(maxY - expMaxY) <= tol)
     }
 
+    // --- Stage 12: agent-origin canvas renders opaque + ink-black ---
+
+    private fun highlightCenter(): Pair<Int, Int> =
+        (((0.10 + 0.40) / 2) * widthCu).toInt() to (((0.20 + 0.30) / 2) * heightCu).toInt()
+
+    @Test
+    fun agent_origin_canvas_renders_the_agent_layer_opaque_and_ink_black() {
+        // Transparent bitmap so the read-back pixel reflects the PAINT's alpha directly.
+        val bmp = Bitmap.createBitmap(widthCu, heightCu, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+
+        val highlight = Highlight(id = "a1", points = a1Points) // no explicit color
+        AnnotationRenderer(AnnotationRenderer.DEFAULT_ACCENT, widthCu, heightCu, agentOriginCanvas = true)
+            .draw(canvas, CanvasTransform(scale = 1f, tx = 0f, ty = 0f), listOf(highlight))
+
+        val (cx, cy) = highlightCenter()
+        val p = bmp.getPixel(cx, cy)
+        bmp.recycle()
+
+        assertEquals("opaque (alpha 255) on an agent-origin canvas", 255, Color.alpha(p))
+        assertTrue(
+            "ink-black, not the space accent",
+            Color.red(p) < 0x30 && Color.green(p) < 0x30 && Color.blue(p) < 0x30,
+        )
+    }
+
+    @Test
+    fun user_canvas_agent_layer_stays_at_70_percent() {
+        val bmp = Bitmap.createBitmap(widthCu, heightCu, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+
+        val highlight = Highlight(id = "a1", points = a1Points)
+        // Default (agentOriginCanvas = false): the Stage-6 70% agent alpha.
+        AnnotationRenderer(AnnotationRenderer.DEFAULT_ACCENT, widthCu, heightCu)
+            .draw(canvas, CanvasTransform(scale = 1f, tx = 0f, ty = 0f), listOf(highlight))
+
+        val (cx, cy) = highlightCenter()
+        val alpha = Color.alpha(bmp.getPixel(cx, cy))
+        bmp.recycle()
+
+        assertEquals("70% agent alpha on a user canvas", AnnotationRenderer.FILL_ALPHA, alpha)
+    }
+
     // --- Stage 9: full-vocabulary rendering ---
 
     // The nine `valid-full-vocabulary.json` annotations, inline so the on-device test

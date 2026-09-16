@@ -23,7 +23,7 @@ from sqlalchemy import func, select
 
 from app.agent.validate import AgentValidationError, run_agent
 from app.config import get_settings
-from app.db.models import Card, Job, Space
+from app.db.models import Canvas, Card, Job, Space
 from app.jobs.handlers import JobContext, JobFailure, register_job_handler
 from app.logging import get_logger
 
@@ -32,11 +32,20 @@ log = get_logger("agent")
 CONTRACT_VERSION = "agent-output/v1"
 
 # Error-card wording per job type when the agent's response fails validation twice.
-_FAILURE_TITLES = {"canvas.annotate": "Could not annotate", "canvas.ask": "Could not respond"}
+_FAILURE_TITLES = {
+    "canvas.annotate": "Could not annotate",
+    "canvas.ask": "Could not respond",
+    "canvas.formalize": "Could not formalize",
+}
 _FAILURE_BODIES = {
     "canvas.annotate": "The agent could not produce a valid annotation for this canvas.",
     "canvas.ask": "The agent could not produce a valid response to this note.",
+    "canvas.formalize": "The agent could not produce a clean diagram for this canvas.",
 }
+
+# Default canvas dimensions (SPEC §4.2) when the source canvas is not server-known.
+_DEFAULT_WIDTH_CU = 2480
+_DEFAULT_HEIGHT_CU = 3508
 
 
 def _daily_count(ctx: JobContext) -> int:
@@ -66,6 +75,49 @@ def _add_cards(ctx: JobContext, cards: list[dict]) -> None:
                 actions=card.get("actions", []),
             )
         )
+
+
+def _formalize_canvas(ctx: JobContext, result: dict) -> None:
+    """Create the agent-origin ``canvases`` row for a done ``canvas.formalize`` job.
+
+    Adds two server-added sibling keys to ``result`` next to ``contract_version`` — the
+    created ``canvas`` and the ``source_canvas_id``. Neither is produced by the model
+    (contract agent-output, same precedent as ``contract_version``). The row is added to
+    ``ctx.session`` and flushed for its id; the queue commits it atomically with the job.
+    """
+    job = ctx.job
+    width_cu = _DEFAULT_WIDTH_CU
+    height_cu = _DEFAULT_HEIGHT_CU
+    if job.canvas_id is not None:
+        source = ctx.session.get(Canvas, job.canvas_id)
+        if source is not None:
+            width_cu = source.width_cu
+            height_cu = source.height_cu
+
+    meta_title = (job.request.get("meta") or {}).get("title")
+    title = f"{meta_title} — formalized" if meta_title else "Formalized"
+
+    canvas = Canvas(
+        space_id=job.space_id,
+        title=title,
+        width_cu=width_cu,
+        height_cu=height_cu,
+        origin="agent",
+    )
+    ctx.session.add(canvas)
+    ctx.session.flush()  # INSERT now (assign id) without ending the transaction
+    ctx.session.refresh(canvas)  # load the server-default created_at
+
+    result["canvas"] = {
+        "id": str(canvas.id),
+        "space_id": str(canvas.space_id),
+        "title": canvas.title,
+        "width_cu": canvas.width_cu,
+        "height_cu": canvas.height_cu,
+        "origin": canvas.origin,
+        "created_at": canvas.created_at.isoformat() if canvas.created_at else None,
+    }
+    result["source_canvas_id"] = str(job.canvas_id) if job.canvas_id else None
 
 
 def handle_canvas_annotate(ctx: JobContext) -> dict:
@@ -145,6 +197,11 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
     result["contract_version"] = CONTRACT_VERSION
     _add_cards(ctx, result["cards"])
 
+    # canvas.formalize: the redraw becomes a new agent-origin canvas that rides back on
+    # this same job (no Phase-4 push). Only for formalize; annotate/ask are unchanged.
+    if job.type == "canvas.formalize":
+        _formalize_canvas(ctx, result)
+
     log.info(
         "agent.done",
         job_id=str(job.id),
@@ -160,3 +217,6 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
 register_job_handler("canvas.annotate", handle_canvas_annotate)
 # Stage 7: canvas.ask reuses the same type-agnostic handler (job.type drives the prompt).
 register_job_handler("canvas.ask", handle_canvas_annotate)
+# Stage 12: canvas.formalize reuses the same handler; it additionally creates an
+# agent-origin canvas row and adds the canvas/source_canvas_id sibling keys to result.
+register_job_handler("canvas.formalize", handle_canvas_annotate)

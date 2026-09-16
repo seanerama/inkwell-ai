@@ -166,4 +166,5 @@ def test_default_instruction_per_type():
     assert build_instruction("Be brief.", "canvas.ask") == "Be brief."
     # canvas.annotate is unchanged.
     assert build_instruction(None, "canvas.annotate") == "Annotate this canvas."
-    assert build_instruction(None, "canvas.formalize") == "Analyse this canvas."
+    # canvas.formalize now has its own default (Stage 12).
+    assert build_instruction(None, "canvas.formalize") == "Formalize this canvas."

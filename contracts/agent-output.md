@@ -50,3 +50,24 @@ contract, not an edit (framework-spec §4.3). Every consumer depends on this sha
 Additive means: a new annotation `type`, a new card `kind`, a new optional property.
 Consumers must ignore unknown optional properties and must render an unknown
 annotation `type` as a labelled `rect` around its bounding box rather than dropping it.
+
+## Additive changes (v1) — 2026-09-16
+
+Stage 12 (`canvas.formalize`) adds **server-added sibling keys** to `jobs.result`,
+alongside the existing `contract_version` key. This is not a change to the model's output
+shape and not a change to the frozen schema above: the model still produces exactly
+`{ summary, annotations, cards, brain_writes }`. These keys are written by the server
+after validation, never by the model — the same precedent as `contract_version`.
+
+For a done `canvas.formalize` job the server adds:
+
+- **`canvas`** — the agent-origin canvas the server created to hold the redraw:
+  `{ id, space_id, title, width_cu, height_cu, origin, created_at }` (`origin` is
+  `"agent"`). The device creates a local canvas with this server id.
+- **`source_canvas_id`** — the id of the canvas that was formalized (the job's
+  `canvas_id`), or `null` if the job carried none.
+
+These keys appear only for `canvas.formalize`; `canvas.annotate` / `canvas.ask` results
+are unchanged. Consumers that do not know them ignore them (they are optional siblings,
+exactly like `contract_version`). Because they are not part of the `AgentOutput` model,
+they are absent from `contracts/schema/agent-output.v1.schema.json`, which stays frozen.

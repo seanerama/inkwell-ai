@@ -13,6 +13,7 @@ import com.inkwell.BuildConfig
 import com.inkwell.contracts.Annotation
 import com.inkwell.data.CanvasRepository
 import com.inkwell.data.CardStatePersistence
+import com.inkwell.data.FormalizedCanvasStore
 import com.inkwell.data.LayerRepository
 import com.inkwell.data.StrokeCommitData
 import com.inkwell.ink.StrokeCommit
@@ -63,7 +64,19 @@ class CanvasViewModel(
      * OFF → the Stage-7 read-only cards. Default from [BuildConfig.CARD_ACTIONS].
      */
     val cardActionsEnabled: Boolean = BuildConfig.CARD_ACTIONS,
-    /** Loads the last chosen job type ("ask"/"annotate"); persisted per the picker. */
+    /**
+     * Stage 12 kill-switch: ON → the picker offers **Formalize** (posts `canvas.formalize`)
+     * and the redraw is materialised as a new agent-origin canvas opened beside the source;
+     * OFF → the option is hidden and no redraw handling runs. Default [BuildConfig.FORMALIZE].
+     */
+    val formalizeEnabled: Boolean = BuildConfig.FORMALIZE,
+    /**
+     * Stage 12: the seam that materialises a `canvas.formalize` redraw as a local canvas
+     * (the app injects [CanvasRepository]). Null in lightweight tests / when formalize is
+     * off; [JobResultHandler] then falls back to the normal single-agent-layer path.
+     */
+    private val formalizedCanvasStore: FormalizedCanvasStore? = null,
+    /** Loads the last chosen job type ("ask"/"annotate"/"formalize"); persisted per the picker. */
     private val loadJobType: () -> String = { "ask" },
     /** Persists the chosen job type (Stage 10 picker remembers the last choice). */
     private val saveJobType: (String) -> Unit = {},
@@ -96,6 +109,24 @@ class CanvasViewModel(
     /** Stage 11: the current canvas title, shown/edited in the canvas top bar. */
     var title by mutableStateOf("")
         private set
+
+    /** Stage 12: the open canvas's origin ("user"|"agent"). */
+    var canvasOrigin by mutableStateOf("user")
+        private set
+
+    /** Stage 12: true when the open canvas is an agent redraw — render its layer opaque (§6.3). */
+    val agentOriginCanvas: Boolean get() = canvasOrigin == "agent"
+
+    /**
+     * Stage 12: the canvas the UI should navigate to after a `canvas.formalize` redraw
+     * completes (the new agent-origin canvas). MainActivity observes it, opens that canvas,
+     * and calls [consumePendingOpenCanvas]. Null when there is nothing to open.
+     */
+    var pendingOpenCanvasId by mutableStateOf<String?>(null)
+        private set
+
+    /** The redraw to show once its new canvas has loaded (applied in [applyState]). */
+    private var pendingRedraw: PendingRedraw? = null
 
     /** Committed strokes in insertion order; the last is what undo removes. */
     val strokes: SnapshotStateList<RenderStroke> = mutableStateListOf()
@@ -153,15 +184,18 @@ class CanvasViewModel(
 
     // --- Stage 10: job-type picker, card actions/state, and anchor interaction ---
 
-    /** The chosen job type for the primary Send: "ask" (canvas.ask) or "annotate". */
-    var jobType by mutableStateOf(if (cardActionsEnabled) loadJobType() else "ask")
+    /** The chosen job type for the primary Send: "ask" (canvas.ask), "annotate", or "formalize". */
+    var jobType by mutableStateOf(
+        if (cardActionsEnabled) sanitizeJobType(loadJobType()) else "ask",
+    )
         private set
 
-    /** The primary Send button label follows the picker: "Send" for ask, "Mark up" for annotate. */
+    /** The primary Send button label follows the picker (Stage 12 adds "Formalize"). */
     val sendLabel: String
         get() = when {
             !online -> "Offline"
             cardActionsEnabled && jobType == "annotate" -> "Mark up"
+            cardActionsEnabled && jobType == "formalize" -> "Formalize"
             else -> "Send"
         }
 
@@ -225,10 +259,19 @@ class CanvasViewModel(
         canvasId = state.canvasId
         currentFolderId = state.folderId
         title = state.title
+        canvasOrigin = state.origin
         canvasWidth = state.widthCu
         canvasHeight = state.heightCu
         strokes.clear()
         strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
+        // Stage 12: if this is the freshly opened redraw canvas, show its diagram + card.
+        pendingRedraw?.takeIf { it.canvasId == state.canvasId }?.let { redraw ->
+            agentAnnotations = redraw.annotations
+            annotationsById = redraw.annotations.associateBy { it.id }
+            agentLayerVisible = true
+            panel = redraw.panel
+            pendingRedraw = null
+        }
         refreshLayerRows()
         ready = true
     }
@@ -353,23 +396,35 @@ class CanvasViewModel(
         }
     }
 
-    /** Stage 10 picker: remember the choice; the Send label follows it. */
+    /** Coerce a persisted/requested job type to one that is currently allowed. */
+    private fun sanitizeJobType(type: String): String = when (type) {
+        "annotate" -> "annotate"
+        "formalize" -> if (formalizeEnabled) "formalize" else "ask"
+        else -> "ask"
+    }
+
+    /** Stage 10 picker: remember the choice; the Send label follows it (Stage 12 adds formalize). */
     fun selectJobType(type: String) {
-        if (type != "ask" && type != "annotate") return // formalize/extract/action are Phase 3+
+        // ask/annotate always allowed; formalize only behind its flag; extract/action Phase 3+.
+        if (type != "ask" && type != "annotate" && !(type == "formalize" && formalizeEnabled)) return
         jobType = type
         saveJobType(type)
     }
 
     /**
-     * Stage 10 one-tap send honouring the job-type picker: "ask" posts `canvas.ask`
+     * Stage 10/12 one-tap send honouring the job-type picker: "ask" posts `canvas.ask`
      * (typed note, or none when blank); "annotate" posts `canvas.annotate` (typed note,
-     * or the feel-test preset when blank).
+     * or the feel-test preset when blank); "formalize" posts `canvas.formalize` carrying
+     * the current canvas title as `meta.title` (no instruction — the guidance drives it).
      */
     fun sendByJobType() {
-        if (jobType == "annotate") {
-            submit(type = "canvas.annotate", instr = instruction.trim().ifBlank { PRESET_INSTRUCTION })
-        } else {
-            submit(type = "canvas.ask", instr = instruction.trim().ifBlank { null })
+        when (jobType) {
+            "annotate" ->
+                submit(type = "canvas.annotate", instr = instruction.trim().ifBlank { PRESET_INSTRUCTION })
+            "formalize" ->
+                submit(type = "canvas.formalize", instr = instruction.trim().ifBlank { null })
+            else ->
+                submit(type = "canvas.ask", instr = instruction.trim().ifBlank { null })
         }
     }
 
@@ -462,6 +517,8 @@ class CanvasViewModel(
                 pngBytes = png,
                 export = export,
                 instruction = instr, // null → omitted from the body (explicitNulls=false)
+                // Stage 12: carry the source title so the redraw is "<title> — formalized".
+                title = if (type == "canvas.formalize") title else null,
             )
 
             // 3. Offline: hold the job locally, flushed in order on reconnect (SPEC §9.5).
@@ -475,7 +532,7 @@ class CanvasViewModel(
             jobInProgress = true
             sendStatus = null
             try {
-                val controller = LoopController(dev, JobResultHandler(layerRepo))
+                val controller = LoopController(dev, JobResultHandler(layerRepo, formalizeStore()))
                 val outcome = controller.run(request, cId) { queued -> currentJobId = queued.id }
                 applyOutcome(outcome)
             } catch (e: Exception) {
@@ -485,6 +542,13 @@ class CanvasViewModel(
             }
         }
     }
+
+    /** The formalize canvas store, only when the flag is on (else null → normal path). */
+    private fun formalizeStore(): FormalizedCanvasStore? =
+        if (formalizeEnabled) formalizedCanvasStore else null
+
+    /** MainActivity calls this after it has begun opening [pendingOpenCanvasId]. */
+    fun consumePendingOpenCanvas() { pendingOpenCanvasId = null }
 
     /** Apply a terminal [com.inkwell.net.LoopOutcome] to the UI (SPEC §9.4 step 6). */
     private suspend fun applyOutcome(outcome: com.inkwell.net.LoopOutcome) {
@@ -499,12 +563,6 @@ class CanvasViewModel(
             )
             return
         }
-        // done: render every annotation and open the panel with the summary + cards.
-        agentAnnotations = outcome.annotations
-        annotationsById = outcome.annotations.associateBy { it.id }
-        agentLayerVisible = true
-        anchorPulses = emptyList()
-        selectedCardIndex = null
         // Prefer the server's cards (identity + state + actions) when card-actions are on;
         // otherwise fall back to the parsed agent-output cards (Stage-7 read-only shape).
         val panelCards = if (cardActionsEnabled && outcome.serverCards.isNotEmpty()) {
@@ -512,15 +570,40 @@ class CanvasViewModel(
         } else {
             outcome.cards.map { PanelCard.from(it) }
         }
-        panel = PanelModel(
-            summary = outcome.summary ?: "",
-            cards = panelCards,
-            isError = false,
-        )
+        val panelModel = PanelModel(summary = outcome.summary ?: "", cards = panelCards, isError = false)
+
+        // Stage 12 (formalize): the redraw is a NEW agent-origin canvas. Don't paint it on
+        // the source — stash it and navigate; the diagram + answer card show once the new
+        // canvas has loaded (see applyState). The source canvas is left untouched.
+        if (outcome.openCanvasId != null) {
+            pendingRedraw = PendingRedraw(
+                canvasId = outcome.openCanvasId,
+                annotations = outcome.annotations,
+                panel = panelModel,
+            )
+            if (cardActionsEnabled) persistAllCardStates(panelCards)
+            pendingOpenCanvasId = outcome.openCanvasId
+            return
+        }
+
+        // done: render every annotation and open the panel with the summary + cards.
+        agentAnnotations = outcome.annotations
+        annotationsById = outcome.annotations.associateBy { it.id }
+        agentLayerVisible = true
+        anchorPulses = emptyList()
+        selectedCardIndex = null
+        panel = panelModel
         // Persist the initial per-card state so a reopened canvas reflects it offline.
         if (cardActionsEnabled) persistAllCardStates(panelCards)
         refreshLayerRows()
     }
+
+    /** A formalize redraw waiting for its new canvas to load before it is shown. */
+    private data class PendingRedraw(
+        val canvasId: String,
+        val annotations: List<Annotation>,
+        val panel: PanelModel,
+    )
 
     fun dismissPanel() {
         panel = null
@@ -638,7 +721,7 @@ class CanvasViewModel(
         val layerRepo = layerRepository ?: return
         viewModelScope.launch {
             try {
-                val handler = JobResultHandler(layerRepo)
+                val handler = JobResultHandler(layerRepo, formalizeStore())
                 offlineQueue.flush { pending ->
                     val queued = dev.submitAgentJob(pending.request)
                     val terminal = dev.pollUntilTerminal(queued.id, dev.sync(null).cursor)
@@ -663,7 +746,9 @@ class CanvasViewModel(
                     .forEach { l ->
                         rows += LayerRow(
                             id = l.id,
-                            label = "Agent annotations",
+                            // Stage 12: on an agent-origin canvas the agent layer is the
+                            // diagram content, so the tray labels it "Diagram" (SPEC §6.3).
+                            label = if (agentOriginCanvas) "Diagram" else "Agent annotations",
                             owner = "agent",
                             visible = agentLayerVisible,
                         )

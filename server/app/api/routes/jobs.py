@@ -27,12 +27,11 @@ router = APIRouter()
 MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB decoded (contract coordinate-mapping / device-api)
 
 # SPEC §7 job types implemented as of this stage.
-IMPLEMENTED_JOB_TYPES = {"canvas.annotate", "canvas.ask"}
+IMPLEMENTED_JOB_TYPES = {"canvas.annotate", "canvas.ask", "canvas.formalize"}
 # Implemented types that need an exported canvas image (contract device-api).
-IMAGE_JOB_TYPES = {"canvas.annotate", "canvas.ask"}
+IMAGE_JOB_TYPES = {"canvas.annotate", "canvas.ask", "canvas.formalize"}
 # SPEC §7 job types that will land in later stages (still 422 not_implemented).
 SPEC_JOB_TYPES = {
-    "canvas.formalize",
     "canvas.extract",
     "canvas.action",
     "agent.push_canvas",
@@ -98,6 +97,10 @@ def create_job(
         req["selection"] = body.selection
     if body.export is not None:
         req["export"] = body.export
+    if body.meta is not None:
+        # Optional device metadata (contract device-api additive). The formalize handler
+        # reads meta.title for the new canvas title; unknown keys are carried untouched.
+        req["meta"] = body.meta
 
     # canvas.annotate / canvas.ask need an exported image; persist it to the blob store
     # (ADR-0004) and carry only its key on the job request (never the base64).

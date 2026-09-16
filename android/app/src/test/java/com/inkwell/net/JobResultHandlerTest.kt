@@ -1,5 +1,6 @@
 package com.inkwell.net
 
+import com.inkwell.data.FormalizedCanvasStore
 import com.inkwell.data.LayerEntity
 import com.inkwell.data.LayerRepository
 import com.inkwell.data.dao.LayerDao
@@ -32,6 +33,35 @@ class JobResultHandlerTest {
         }
         override suspend fun forCanvas(canvasId: String): List<LayerEntity> =
             store.filter { it.canvasId == canvasId }.sortedBy { it.z }
+    }
+
+    /** Records the args and returns a canvas-scoped agent layer (Stage 12 formalize seam). */
+    private class FakeFormalizedCanvasStore : FormalizedCanvasStore {
+        data class Call(
+            val canvasId: String,
+            val spaceId: String,
+            val title: String,
+            val widthCu: Int,
+            val heightCu: Int,
+            val sourceCanvasId: String?,
+            val jobId: String,
+        )
+        val calls = mutableListOf<Call>()
+        override suspend fun createFormalizedCanvas(
+            canvasId: String,
+            spaceId: String,
+            title: String,
+            widthCu: Int,
+            heightCu: Int,
+            sourceCanvasId: String?,
+            jobId: String,
+        ): LayerEntity {
+            calls += Call(canvasId, spaceId, title, widthCu, heightCu, sourceCanvasId, jobId)
+            return LayerEntity(
+                id = "agent-layer", canvasId = canvasId, z = 0, owner = "agent", type = "annotation",
+                visible = true, opacity = 1.0f, jobId = jobId, createdAt = 1L,
+            )
+        }
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -137,6 +167,81 @@ class JobResultHandlerTest {
         assertEquals(0, dao.store.size)
         assertEquals("Over cap", outcome.errorTitle)
         assertEquals("Daily cap reached.", outcome.errorBody)
+    }
+
+    // --- Stage 12: canvas.formalize ---
+
+    private val formalizeResult = resultObject(
+        """
+        {
+          "summary": "Redrew the topology as three aligned boxes.",
+          "annotations": [
+            { "id": "b1", "type": "rect", "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.1, "label": "Web" }
+          ],
+          "cards": [ { "kind": "answer", "title": "Cleaned up", "body": "Aligned the nodes." } ],
+          "brain_writes": [],
+          "contract_version": "agent-output/v1",
+          "canvas": {
+            "id": "srv-canvas-9", "space_id": "space-1", "title": "Topology — formalized",
+            "width_cu": 1600, "height_cu": 1200, "origin": "agent",
+            "created_at": "2026-09-16T00:00:00Z"
+          },
+          "source_canvas_id": "canvas-1"
+        }
+        """.trimIndent(),
+    )
+
+    private fun formalizeJob() = Job(
+        id = "job-f", spaceId = "space-1", canvasId = "canvas-1", direction = "to_agent",
+        type = "canvas.formalize", status = "done", request = JsonObject(emptyMap()),
+        result = formalizeResult, error = null,
+        createdAt = "2026-09-16T00:00:00Z", updatedAt = "2026-09-16T00:00:01Z",
+    )
+
+    @Test
+    fun formalize_result_creates_a_new_agent_canvas_with_the_server_id_and_no_source_layer() = runTest {
+        val dao = FakeLayerDao()
+        val store = FakeFormalizedCanvasStore()
+        val handler = JobResultHandler(
+            LayerRepository(dao, idGen = { "agent-layer" }, clock = { 1L }),
+            formalizedCanvasStore = store,
+        )
+
+        val outcome = handler.handle(formalizeJob(), canvasId = "canvas-1")
+
+        // The redraw was materialised through the store with the SERVER's identity + dims.
+        val call = store.calls.single()
+        assertEquals("srv-canvas-9", call.canvasId)
+        assertEquals("space-1", call.spaceId)
+        assertEquals("Topology — formalized", call.title)
+        assertEquals(1600, call.widthCu)
+        assertEquals(1200, call.heightCu)
+        assertEquals("canvas-1", call.sourceCanvasId) // the source, for its folder
+        assertEquals("job-f", call.jobId)
+
+        // No agent layer was created on the SOURCE canvas (its ink is untouched).
+        assertEquals(0, dao.upsertCount)
+        // The outcome points the UI at the new canvas and carries the redraw + answer card.
+        assertEquals("srv-canvas-9", outcome.newCanvasId)
+        assertEquals("srv-canvas-9", outcome.openCanvasId)
+        assertEquals(1, outcome.annotations.size)
+        assertEquals(listOf("Cleaned up"), outcome.cardTitles)
+        assertEquals("srv-canvas-9", outcome.agentLayer!!.canvasId)
+        assertFalse(outcome.isError)
+    }
+
+    @Test
+    fun formalize_result_without_a_store_falls_back_to_the_normal_source_layer_path() = runTest {
+        val dao = FakeLayerDao()
+        // No store wired (flag OFF): the canvas sibling key is ignored, normal path runs.
+        val handler = JobResultHandler(LayerRepository(dao, idGen = { "agent-layer" }, clock = { 1L }))
+
+        val outcome = handler.handle(formalizeJob(), canvasId = "canvas-1")
+
+        assertNull(outcome.newCanvasId)
+        assertNull(outcome.openCanvasId)
+        assertEquals(1, dao.upsertCount) // one agent layer on the source canvas
+        assertEquals("canvas-1", outcome.agentLayer!!.canvasId)
     }
 
     @Test

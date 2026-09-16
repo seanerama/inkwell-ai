@@ -105,6 +105,8 @@ fun CanvasScreen(
                         view.setAccentColor(viewModel.accentColor)
                         view.setAgentAnnotations(viewModel.agentAnnotations)
                         view.setAgentLayerVisible(viewModel.agentLayerVisible)
+                        // Stage 12: an agent-origin canvas (a Formalize redraw) draws opaque.
+                        view.setAgentOriginCanvas(viewModel.agentOriginCanvas)
                         // Stage 10: card → canvas anchor pulse (~1.5 s after a card tap).
                         view.setAnchorPulses(viewModel.anchorPulses)
                         if (debugEnabled) {
@@ -390,7 +392,9 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (cardActions) {
-                    // Stage 10 job-type picker: Ask / Mark up (the rest are Phase 3+).
+                    // Job-type picker: Ask / Mark up (Stage 10), plus Formalize (Stage 12,
+                    // behind BuildConfig.FORMALIZE). Extract / Action remain Phase 3+.
+                    val formalize = viewModel.formalizeEnabled
                     Text("Job type", fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SegmentedChoice(
@@ -403,13 +407,23 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                             selected = viewModel.jobType == "annotate",
                             tag = CanvasTags.INSTRUCTION_MARKUP,
                         ) { viewModel.selectJobType("annotate") }
+                        if (formalize) {
+                            SegmentedChoice(
+                                label = "Formalize",
+                                selected = viewModel.jobType == "formalize",
+                                tag = CanvasTags.INSTRUCTION_FORMALIZE,
+                            ) { viewModel.selectJobType("formalize") }
+                        }
                     }
+                    // The still-unimplemented Phase 3+ types stay greyed (minus Formalize
+                    // once its flag is on).
+                    val greyed = if (formalize) listOf("Extract", "Action") else listOf("Formalize", "Extract", "Action")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Formalize", "Extract", "Action").forEach { label ->
+                        greyed.forEach { label ->
                             OutlinedButton(onClick = {}, enabled = false) { Text(label) }
                         }
                     }
-                    Text("Formalize / Extract / Action — Phase 3+", color = Color(0xFF9E9E9E))
+                    Text("${greyed.joinToString(" / ")} — Phase 3+", color = Color(0xFF9E9E9E))
                 }
                 OutlinedTextField(
                     value = viewModel.instruction,
@@ -701,6 +715,9 @@ object CanvasTags {
     // Stage 10 job-type picker.
     const val INSTRUCTION_ASK = "canvas_instruction_ask"
     const val INSTRUCTION_MARKUP = "canvas_instruction_markup"
+
+    // Stage 12 job-type picker: Formalize.
+    const val INSTRUCTION_FORMALIZE = "canvas_instruction_formalize"
 
     fun color(index: Int) = "canvas_color_$index"
     fun panelCard(index: Int) = "canvas_panel_card_$index"
