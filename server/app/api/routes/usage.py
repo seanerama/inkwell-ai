@@ -37,12 +37,20 @@ def usage(
 ) -> dict:
     since_dt = _parse_since(since)
 
-    stmt = select(
-        Job.space_id,
-        func.count(Job.id),
-        func.coalesce(func.sum(Job.input_tokens), 0),
-        func.coalesce(func.sum(Job.output_tokens), 0),
-    ).where(Job.input_tokens.is_not(None))
+    stmt = (
+        select(
+            Job.space_id,
+            func.count(Job.id),
+            func.coalesce(func.sum(Job.input_tokens), 0),
+            func.coalesce(func.sum(Job.output_tokens), 0),
+        )
+        .where(Job.input_tokens.is_not(None))
+        # Exclude deploy-canary jobs (request.canary == true). A naive ``!= 'true'``
+        # would drop every normal job too: for a job without the key ``->> 'canary'`` is
+        # SQL NULL and ``NULL != 'true'`` is NULL (falsey in WHERE). ``is_distinct_from``
+        # treats NULL as distinct from 'true', so keyless jobs are kept.
+        .where(Job.request["canary"].astext.is_distinct_from("true"))
+    )
     if since_dt is not None:
         stmt = stmt.where(Job.created_at >= since_dt)
     stmt = stmt.group_by(Job.space_id)

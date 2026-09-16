@@ -25,6 +25,9 @@ dev = [
     "pytest>=8.3,<9.0",
     "httpx>=0.27,<0.29",
     "ruff>=0.6,<0.9",
+    # Dev-only: regenerates server/app/canary/fixture.png (Stage 8 deploy canary). The
+    # runtime image only reads the committed PNG and never imports Pillow.
+    "pillow>=10.1,<12.0",
 ]
 
 [build-system]
