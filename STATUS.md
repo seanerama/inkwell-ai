@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.6
-**Deployed at:** 2026-09-15T23:43:27Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:30b2b2f65ecfc699eaf579a588394d61152b2c6c76eebc7f2a00e4dafeff62ac (v0.0.5)
+**Live version:** 0.0.7
+**Deployed at:** 2026-09-16T00:47:51Z
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:4a3679129e8e5f89a2af8bc418eec8af8ad8d2a3361d8e9a1eb79c974b20b3b1 (v0.0.6)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.6 by digest; AGENT_ENABLED=true for stage 6 verification; smoke gate passed; all three release lanes green; systemd enabled","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:4a3679129e8e5f89a2af8bc418eec8af8ad8d2a3361d8e9a1eb79c974b20b3b1","deployed_at":"2026-09-15T23:43:28Z"}
+- **staging:** {"status":"deployed v0.0.7 by digest (contracts shipped inside the image; canvas.* jobs unblocked); AGENT_ENABLED=true; smoke gate passed; systemd enabled","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:d2e24cae41055d485b35cda25a7d962eaf9c665be04a2073f4d8d3815ab38873","deployed_at":"2026-09-16T00:47:51Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)

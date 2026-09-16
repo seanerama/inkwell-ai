@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.7
+
+### Other
+- Fix import order in contracts/check.py (ruff I001) after the INKWELL_CONTRACTS_DIR change
+- Server image: ship the frozen contracts; gate proves the image can load them
+- Release v0.0.6: clean release lanes; STATUS staging on v0.0.6
+
 ## 0.0.6
 
 ### Other
