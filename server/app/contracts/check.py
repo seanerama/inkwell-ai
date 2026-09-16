@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+import os
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +38,20 @@ def _repo_root() -> Path:
 
 
 def _contracts_dir() -> Path:
-    return _repo_root() / "contracts"
+    """Where the frozen contracts live.
+
+    ``INKWELL_CONTRACTS_DIR`` wins (the image sets it to the copied-in
+    ``/app/contracts``); otherwise the repo checkout. A missing directory is a
+    packaging defect, so fail with a message that says which path was tried.
+    """
+    override = os.environ.get("INKWELL_CONTRACTS_DIR")
+    candidate = Path(override) if override else _repo_root() / "contracts"
+    if not (candidate / "schema").is_dir():
+        raise FileNotFoundError(
+            f"contracts directory not found at {candidate} (set INKWELL_CONTRACTS_DIR); "
+            "the server cannot load the frozen agent-output schema"
+        )
+    return candidate
 
 
 def normalize(node: Any) -> Any:

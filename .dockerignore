@@ -1,0 +1,9 @@
+# Root build context for server/Dockerfile: keep the context small.
+*
+!server/
+!contracts/
+server/.venv/
+server/**/__pycache__/
+server/tests/
+server/.pytest_cache/
+server/.ruff_cache/
