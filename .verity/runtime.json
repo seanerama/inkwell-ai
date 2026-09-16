@@ -21,6 +21,7 @@
     "2026-09-15: walking skeleton verified on the physical tablet against staging v0.0.4 (pair, Check, Ping round-trip). Pending on operator: rotate ANTHROPIC_API_KEY (exposed in a session log), sudo systemctl enable inkwell-staging. Prod not yet promoted (confirm gate).",
     "2026-09-16: Tailscale SSH check mode expires roughly daily; the operator must re-approve the login link before deploy.sh can run.",
     "2026-09-16: first successful real agent job on staging (canvas.ask replay of the owner's 'what is 1+9=?' export): 3038 in / 161 out tokens.",
-    "v0.0.12 (stages 11 Library + 12 Formalize) deployed to staging 2026-09-16 by digest; health 0.0.12, canary canvas.ask done (1 annotation, 1 card), Playwright smoke 3/3 incl. new GET /canvases bearer gate (200 [] with tablet token). Prod NOT promoted (confirm gate). On-device smokes pending: smoke/library.md, smoke/formalize.md on the v0.0.12 APK. No new server env vars; client flags LIBRARY and FORMALIZE ON in release by documented exception."
+    "v0.0.12 (stages 11 Library + 12 Formalize) deployed to staging 2026-09-16 by digest; health 0.0.12, canary canvas.ask done (1 annotation, 1 card), Playwright smoke 3/3 incl. new GET /canvases bearer gate (200 [] with tablet token). Prod NOT promoted (confirm gate). On-device smokes pending: smoke/library.md, smoke/formalize.md on the v0.0.12 APK. No new server env vars; client flags LIBRARY and FORMALIZE ON in release by documented exception.",
+    "2026-09-16: owner ran smoke/library.md and smoke/formalize.md on the tablet with the v0.0.12 APK — both pass. v0.3 (Library + Formalize) verified on device; staging acceptance complete."
   ]
 }

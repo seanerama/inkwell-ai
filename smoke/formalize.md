@@ -121,4 +121,4 @@ not_implemented` if the server predates Stage 12).
 
 | Date (UTC) | Release | Operator | New canvas + redraw | Original untouched | Better than sketch | Notes |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| 2026-09-16 23:10 | v0.0.12 | seanerama | pass | pass | pass | owner: formalize worked on the tablet (first live run) |

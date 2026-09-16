@@ -126,4 +126,4 @@ the card picker), independent of `LIBRARY`.
 
 | Date (UTC) | Release | Operator | S1 | S2 | S3 | S4 | Notes |
 |---|---|---|---|---|---|---|---|
-| | | | | | | | |
+| 2026-09-16 23:10 | v0.0.12 | seanerama | pass | pass | pass | pass | first on-device run; owner reports library worked end to end |
