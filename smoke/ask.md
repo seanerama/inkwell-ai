@@ -133,3 +133,9 @@ With `ONE_TAP_ASK` OFF, Send opens the Stage-6 instruction sheet first and posts
   server; redeploy before testing.
 - **"Offline":** the tablet lost the tailnet; Send is disabled by design (SPEC §9.5).
 - **Stuck on "Working…" past ~30 s:** capture the job id and the server logs.
+
+## Results log
+
+| Date (UTC) | Release | Operator | Scenario 1 (1+9) | Notes |
+|---|---|---|---|---|
+| 2026-09-16 | v0.0.9 | seanerama | pass — "= 10" beside the question, answer card expanded | first live agent job; v0.0.8 failed on structured-output schema limits (ADR-0006 amendment) |
