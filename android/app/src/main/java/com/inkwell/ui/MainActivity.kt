@@ -1,6 +1,7 @@
 package com.inkwell.ui
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,31 +13,55 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.inkwell.BuildConfig
 import com.inkwell.data.CanvasRepository
 import com.inkwell.data.InkDatabase
 import com.inkwell.data.LayerRepository
+import com.inkwell.data.LibraryRepository
 import com.inkwell.data.RoomCardStateRepository
+import com.inkwell.data.ThumbnailRenderer
 import com.inkwell.net.AndroidConnectivity
 import com.inkwell.net.EncryptedTokenStore
 import com.inkwell.net.LoopServices
 import com.inkwell.net.SyncWorker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
- * Single-Activity host. Launch screen depends on the ink kill-switch
- * ([BuildConfig.INK_ENABLED], default ON): ON → [CanvasScreen] (the ink canvas);
- * OFF → the settings/pairing screen. Pairing is always reachable from the canvas's
- * Settings entry (SPEC §9.3 / stage: pairing moves to a settings entry).
+ * Single-Activity host. Launch screen depends on the kill-switches:
+ *
+ *  - [BuildConfig.LIBRARY] (Stage 11, default ON): ON → the app opens on [LibraryScreen]
+ *    (folders + canvases for the seeded space); tapping a canvas tile opens
+ *    [CanvasScreen] for that id, and Back returns to the folder. OFF → today's behaviour:
+ *    open the first (default) canvas directly.
+ *  - [BuildConfig.INK_ENABLED] (default ON): OFF → the settings/pairing screen is the app.
+ *
+ * Pairing is always reachable from the canvas's / library's Settings entry.
  */
 class MainActivity : ComponentActivity() {
+
+    // Shared across both ViewModels so there is exactly one Room instance / repository.
+    private val db by lazy { InkDatabase.create(applicationContext) }
+    private val canvasRepository by lazy {
+        CanvasRepository(
+            spaceDao = db.spaceDao(),
+            canvasDao = db.canvasDao(),
+            layerDao = db.layerDao(),
+            strokeDao = db.strokeDao(),
+        )
+    }
+    private val thumbnailRenderer by lazy { ThumbnailRenderer(applicationContext.filesDir) }
 
     private val pairingViewModel: PairingViewModel by viewModels {
         val tokenStore = EncryptedTokenStore(applicationContext)
@@ -44,13 +69,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private val canvasViewModel: CanvasViewModel by viewModels {
-        val db = InkDatabase.create(applicationContext)
-        val repo = CanvasRepository(
-            spaceDao = db.spaceDao(),
-            canvasDao = db.canvasDao(),
-            layerDao = db.layerDao(),
-            strokeDao = db.strokeDao(),
-        )
         val layerRepo = LayerRepository(db.layerDao())
         val cardStateRepo = RoomCardStateRepository(db.cardStateDao())
         val tokenStore = EncryptedTokenStore(applicationContext)
@@ -60,7 +78,7 @@ class MainActivity : ComponentActivity() {
         viewModelFactory {
             initializer {
                 CanvasViewModel(
-                    repository = repo,
+                    repository = canvasRepository,
                     layerRepository = layerRepo,
                     // Built fresh so it always uses the current pairing (or null if unpaired).
                     deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
@@ -69,8 +87,21 @@ class MainActivity : ComponentActivity() {
                     cardStatePersistence = cardStateRepo,
                     loadJobType = { prefs.getString("job_type", "ask") ?: "ask" },
                     saveJobType = { prefs.edit().putString("job_type", it).apply() },
+                    // With the Library on, the canvas is opened per-tile via openCanvas().
+                    autoOpenDefault = !BuildConfig.LIBRARY,
                 )
             }
+        }
+    }
+
+    private val libraryViewModel: LibraryViewModel by viewModels {
+        val library = LibraryRepository(
+            folderDao = db.folderDao(),
+            canvasDao = db.canvasDao(),
+            layerDao = db.layerDao(),
+        )
+        viewModelFactory {
+            initializer { LibraryViewModel(library = library, canvasRepository = canvasRepository) }
         }
     }
 
@@ -84,23 +115,86 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    // Screen routing without a nav library (two screens this stage).
+                    // Screen routing without a nav library.
                     var showSettings by remember { mutableStateOf(!BuildConfig.INK_ENABLED) }
 
-                    if (BuildConfig.INK_ENABLED && !showSettings) {
-                        CanvasScreen(
-                            viewModel = canvasViewModel,
-                            onOpenSettings = { showSettings = true },
-                        )
-                    } else {
-                        SettingsScaffold(
-                            canReturnToCanvas = BuildConfig.INK_ENABLED,
-                            onBack = { showSettings = false },
-                        ) {
-                            PairingScreen(viewModel = pairingViewModel)
+                    when {
+                        showSettings || !BuildConfig.INK_ENABLED -> {
+                            SettingsScaffold(
+                                canReturnToCanvas = BuildConfig.INK_ENABLED,
+                                onBack = { showSettings = false },
+                            ) {
+                                PairingScreen(viewModel = pairingViewModel)
+                            }
+                        }
+                        BuildConfig.LIBRARY -> {
+                            LibraryRoute(
+                                onOpenSettings = { showSettings = true },
+                            )
+                        }
+                        else -> {
+                            // Flag OFF: today's direct-to-canvas flow.
+                            CanvasScreen(
+                                viewModel = canvasViewModel,
+                                onOpenSettings = { showSettings = true },
+                            )
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * The Library launch flow: the grid, or the opened canvas. Opening a tile loads it into
+     * the shared [canvasViewModel]; Back renders a fresh thumbnail (best-effort) and returns
+     * to the folder.
+     */
+    @androidx.compose.runtime.Composable
+    private fun LibraryRoute(onOpenSettings: () -> Unit) {
+        var selectedCanvasId by remember { mutableStateOf<String?>(null) }
+
+        val openId = selectedCanvasId
+        if (openId == null) {
+            LibraryScreen(
+                viewModel = libraryViewModel,
+                onOpenCanvas = { selectedCanvasId = it },
+                loadThumbnail = { canvas ->
+                    val f = thumbnailRenderer.file(canvas.id)
+                    if (f.exists()) {
+                        BitmapFactory.decodeFile(f.absolutePath)?.asImageBitmap()
+                    } else {
+                        null
+                    }
+                },
+            )
+        } else {
+            LaunchedEffect(openId) { canvasViewModel.openCanvas(openId) }
+            CanvasScreen(
+                viewModel = canvasViewModel,
+                onOpenSettings = onOpenSettings,
+                onBack = {
+                    renderThumbnailAsync(openId)
+                    selectedCanvasId = null
+                },
+            )
+        }
+    }
+
+    /** Render a 256-px thumbnail for the canvas just closed (off the main thread). */
+    private fun renderThumbnailAsync(canvasId: String) {
+        val width = canvasViewModel.canvasWidth
+        val height = canvasViewModel.canvasHeight
+        val strokes = canvasViewModel.strokes.toList()
+        lifecycleScope.launch(Dispatchers.Default) {
+            runCatching {
+                thumbnailRenderer.ensure(
+                    canvasId = canvasId,
+                    updatedAt = System.currentTimeMillis(),
+                    widthCu = width,
+                    heightCu = height,
+                    strokes = strokes,
+                )
             }
         }
     }
@@ -108,8 +202,8 @@ class MainActivity : ComponentActivity() {
 
 /**
  * Wraps the pairing screen with a back affordance when it is reached as "settings"
- * from the canvas. When the ink kill-switch is OFF the pairing screen is the whole
- * app, so no back is offered.
+ * from the canvas/library. When the ink kill-switch is OFF the pairing screen is the
+ * whole app, so no back is offered.
  */
 @androidx.compose.runtime.Composable
 private fun SettingsScaffold(
@@ -122,7 +216,7 @@ private fun SettingsScaffold(
             TextButton(
                 onClick = onBack,
                 modifier = Modifier.padding(8.dp),
-            ) { Text("< Back to canvas") }
+            ) { Text("< Back") }
         }
         content()
     }

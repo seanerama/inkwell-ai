@@ -72,6 +72,32 @@ class CanvasViewModelSendTest {
         override suspend fun upsert(canvas: CanvasEntity) { store.removeAll { it.id == canvas.id }; store.add(canvas) }
         override suspend fun forSpace(spaceId: String) = store.filter { it.spaceId == spaceId }.sortedByDescending { it.updatedAt }
         override suspend fun byId(id: String) = store.firstOrNull { it.id == id }
+        // Stage 11 additions (unused by these Stage-7 send tests).
+        override suspend fun inFolder(spaceId: String, folderId: String?) =
+            store.filter {
+                it.spaceId == spaceId && it.deletedAt == null &&
+                    ((folderId == null && it.folderId == null) || it.folderId == folderId)
+            }.sortedByDescending { it.updatedAt }
+        override suspend fun trashed(spaceId: String) =
+            store.filter { it.spaceId == spaceId && it.deletedAt != null }.sortedByDescending { it.deletedAt }
+        override suspend fun allForSpace(spaceId: String) = store.filter { it.spaceId == spaceId }
+        override suspend fun rename(id: String, title: String, updatedAt: Long) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(title = title, updatedAt = updatedAt)
+        }
+        override suspend fun move(id: String, folderId: String?, updatedAt: Long) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(folderId = folderId, updatedAt = updatedAt)
+        }
+        override suspend fun setDeletedAt(id: String, deletedAt: Long?) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(deletedAt = deletedAt)
+        }
+        override suspend fun trashCanvasesInFolder(spaceId: String, folderId: String, deletedAt: Long) {
+            store.indices.forEach { i ->
+                val c = store[i]
+                if (c.spaceId == spaceId && c.deletedAt == null && c.folderId == folderId) store[i] = c.copy(deletedAt = deletedAt)
+            }
+        }
+        override suspend fun purgeTrashedBefore(cutoff: Long) { store.removeAll { it.deletedAt != null && it.deletedAt!! < cutoff } }
+        override suspend fun hardDelete(id: String) { store.removeAll { it.id == id } }
     }
 
     private class FakeLayerDao : LayerDao {
