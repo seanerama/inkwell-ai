@@ -4,6 +4,7 @@ inkwell token create --name <name>   # mint a token, print the plaintext once
 inkwell token revoke <id>            # revoke a token by id
 inkwell token list                   # list tokens (never prints the secret)
 inkwell db seed                      # idempotently seed the four default spaces
+inkwell canary [--space work] [--timeout 90]  # run one live agent job (deploy gate)
 """
 
 from __future__ import annotations
@@ -59,6 +60,12 @@ def _cmd_db_seed(_: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_canary(args: argparse.Namespace) -> int:
+    from app.canary.run import run_canary
+
+    return run_canary(space=args.space, timeout=args.timeout)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="inkwell")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -78,6 +85,13 @@ def build_parser() -> argparse.ArgumentParser:
     db_sub = db.add_subparsers(dest="action", required=True)
     seed = db_sub.add_parser("seed", help="seed default spaces (idempotent)")
     seed.set_defaults(func=_cmd_db_seed)
+
+    canary = sub.add_parser("canary", help="run one live agent job (deploy gate)")
+    canary.add_argument("--space", default="work", help="space slug (default: work)")
+    canary.add_argument(
+        "--timeout", type=float, default=90, help="seconds to wait for the worker (default: 90)"
+    )
+    canary.set_defaults(func=_cmd_canary)
 
     return parser
 
