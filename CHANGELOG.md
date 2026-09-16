@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.9
+
+### Other
+- Agent: prompt-guided JSON by default; structured outputs behind a flag (ADR-0006 amendment)
+- Release v0.0.8: STATUS staging (stage 7 live)
+
 ## 0.0.8
 
 ### Other

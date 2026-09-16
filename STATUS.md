@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.8
-**Deployed at:** 2026-09-16T14:16:37Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:d2e24cae41055d485b35cda25a7d962eaf9c665be04a2073f4d8d3815ab38873 (v0.0.7)
+**Live version:** 0.0.9
+**Deployed at:** 2026-09-16T17:07:03Z
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:68817b1d76062999bf737012afb51f55cd0544fb68e476976812b88253203b49 (v0.0.8)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.8 by digest (stage 7: canvas.ask live); AGENT_ENABLED=true; smoke gate passed; systemd enabled","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:68817b1d76062999bf737012afb51f55cd0544fb68e476976812b88253203b49","deployed_at":"2026-09-16T14:16:37Z"}
+- **staging:** {"status":"deployed v0.0.9 by digest; agent on prompt-guided JSON (ADR-0006 amendment); owner's note replayed on the live worker: done, text '= 10' + answer card, 0 clamps; smoke gate passed","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:a59a2addf654dda7e1c6326054ac8d7c6713258c8a0e60009685b42cb96ef43f","deployed_at":"2026-09-16T17:07:03Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
@@ -18,3 +18,4 @@
 ## Coordination notes
 - 2026-09-15: walking skeleton verified on the physical tablet against staging v0.0.4 (pair, Check, Ping round-trip). Pending on operator: rotate ANTHROPIC_API_KEY (exposed in a session log), sudo systemctl enable inkwell-staging. Prod not yet promoted (confirm gate).
 - 2026-09-16: Tailscale SSH check mode expires roughly daily; the operator must re-approve the login link before deploy.sh can run.
+- 2026-09-16: first successful real agent job on staging (canvas.ask replay of the owner's 'what is 1+9=?' export): 3038 in / 161 out tokens.
