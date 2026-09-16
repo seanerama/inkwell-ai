@@ -40,6 +40,33 @@ data class CanvasEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
     @ColumnInfo(name = "origin") val origin: String, // user | agent
+    // Stage 11 (contract `ink-storage` v3, additive): the folder this canvas lives in
+    // (null = the space root) and its Trash tombstone (null = live; set = soft-deleted,
+    // purged 30 days later). Both nullable with a default so MIGRATION_2_3's `ADD COLUMN`
+    // (no default) matches the entity — existing canvases stay at the root, undeleted.
+    @ColumnInfo(name = "folder_id") val folderId: String? = null,
+    @ColumnInfo(name = "deleted_at") val deletedAt: Long? = null,
+)
+
+/**
+ * A folder inside a space (Stage 11, contract `ink-storage` v3, additive). Folders live
+ * **inside** a space — one tree per space — so the file structure never leaks across
+ * agent contexts (SPEC §2). [parentId] null = a root folder; [deletedAt] null = live, set
+ * = soft-deleted (Trash, purged after 30 days). Added by [com.inkwell.data.InkDatabase]
+ * MIGRATION_2_3; no v1/v2 table is altered destructively.
+ */
+@Entity(
+    tableName = "folders",
+    indices = [Index("space_id"), Index("parent_id")],
+)
+data class FolderEntity(
+    @PrimaryKey @ColumnInfo(name = "id") val id: String,
+    @ColumnInfo(name = "space_id") val spaceId: String,
+    @ColumnInfo(name = "parent_id") val parentId: String? = null,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    @ColumnInfo(name = "deleted_at") val deletedAt: Long? = null,
 )
 
 @Entity(

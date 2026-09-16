@@ -91,6 +91,15 @@ android {
             // already dark-launches all agent work. Flip to "false" to restore read-only
             // cards without a code change.
             buildConfigField("boolean", "CARD_ACTIONS", "true")
+            // Library kill-switch (Stage 11 dark-launch flag, THIS stage's feature): ON
+            // makes the app open on the Library (folders + canvases per space, with
+            // create / rename / move / delete-to-Trash / open, and a titled canvas with a
+            // back button). OFF restores today's behaviour: open the first canvas directly
+            // (MainActivity → CanvasScreen). Documented exception (same rationale as
+            // ONE_TAP_ASK/FULL_VOCABULARY/CARD_ACTIONS): default ON in debug AND release,
+            // because prod is not promoted, staging is the only environment. Flip to
+            // "false" to restore the direct-to-canvas launch without a code change.
+            buildConfigField("boolean", "LIBRARY", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -116,6 +125,10 @@ android {
             // block and the stage-10 spec). Flip to "false" to fall back to the Stage-7
             // read-only cards (no action buttons, no state changes, no picker).
             buildConfigField("boolean", "CARD_ACTIONS", "true")
+            // Stage 11 Library: ON in release by documented exception (see the debug block
+            // and the stage-11 spec). Flip to "false" to fall back to the direct-to-canvas
+            // launch (open the first canvas) without a code change.
+            buildConfigField("boolean", "LIBRARY", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

@@ -42,10 +42,10 @@ class PairingInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val db = Room.inMemoryDatabaseBuilder(context, InkDatabase::class.java).build()
         try {
-            // v1 (stage 2) -> v2 (stage 10, card state). The 1 -> 2 upgrade path is
-            // covered by InkDatabaseMigrationTest; this proves a fresh open lands on
-            // the current schema.
-            assertEquals(2, db.openHelper.readableDatabase.version)
+            // v1 (stage 2) -> v2 (stage 10, card state) -> v3 (stage 11, folders +
+            // canvas folder_id/deleted_at). The upgrade paths are covered by
+            // InkDatabaseMigrationTest; this proves a fresh open lands on the current schema.
+            assertEquals(3, db.openHelper.readableDatabase.version)
             // Exercise a DAO to prove the schema is real and queryable.
             runBlocking { assertEquals(0, db.strokeDao().count()) }
         } finally {

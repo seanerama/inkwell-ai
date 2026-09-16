@@ -67,11 +67,17 @@ fun CanvasScreen(
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
     debugEnabled: Boolean = BuildConfig.DEBUG,
+    // Stage 11: when the Library launched this canvas, Back returns to its folder. Null
+    // in the flag-OFF path (there is nothing to go back to).
+    onBack: (() -> Unit)? = null,
 ) {
     val config = LocalConfiguration.current
     val landscape = config.screenWidthDp >= config.screenHeightDp
 
     Column(modifier = modifier.fillMaxSize()) {
+        if (onBack != null) {
+            CanvasTopBar(viewModel = viewModel, onBack = onBack)
+        }
         Toolbar(viewModel = viewModel, onOpenSettings = onOpenSettings, debugEnabled = debugEnabled)
 
         Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -494,6 +500,49 @@ private fun ExportPreviewDialog(
     )
 }
 
+/**
+ * Stage 11 canvas top bar: a **back** button that returns to the folder the canvas lives
+ * in, and an **editable title** — tap it to edit, the change is persisted via
+ * [CanvasViewModel.renameCanvas]. Only shown when the Library launched this canvas.
+ */
+@Composable
+private fun CanvasTopBar(viewModel: CanvasViewModel, onBack: () -> Unit) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember(viewModel.title) { mutableStateOf(viewModel.title) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = onBack, modifier = Modifier.testTag(CanvasTags.BACK)) {
+            Text("< Library")
+        }
+        if (editing) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                singleLine = true,
+                modifier = Modifier.weight(1f).testTag(CanvasTags.TITLE_FIELD),
+            )
+            TextButton(
+                onClick = { viewModel.renameCanvas(draft); editing = false },
+                modifier = Modifier.testTag(CanvasTags.TITLE_SAVE),
+            ) { Text("Save") }
+        } else {
+            Text(
+                text = viewModel.title.ifBlank { "Untitled" },
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { draft = viewModel.title; editing = true }
+                    .testTag(CanvasTags.TITLE),
+            )
+        }
+    }
+}
+
 @Composable
 private fun Toolbar(
     viewModel: CanvasViewModel,
@@ -551,11 +600,21 @@ private fun Toolbar(
             // The note sheet is reachable whenever one-tap ask OR the Stage-10 picker is on
             // (the picker lives inside the sheet).
             if (viewModel.oneTapAsk || viewModel.cardActionsEnabled) {
-                IconButton(
-                    onClick = viewModel::openInstruction,
-                    enabled = viewModel.online,
-                    modifier = Modifier.testTag(CanvasTags.ADD_NOTE),
-                ) { Icon(Icons.Filled.Edit, contentDescription = "Add a note…") }
+                // Stage 11: a visible "Note" label sits beside the pencil — the owner
+                // could not find the bare icon (2026-09-16). The whole affordance opens
+                // the note sheet.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clickable(enabled = viewModel.online, onClick = viewModel::openInstruction)
+                        .testTag(CanvasTags.ADD_NOTE),
+                ) {
+                    IconButton(
+                        onClick = viewModel::openInstruction,
+                        enabled = viewModel.online,
+                    ) { Icon(Icons.Filled.Edit, contentDescription = "Add a note…") }
+                    Text("Note", modifier = Modifier.testTag(CanvasTags.NOTE_LABEL))
+                }
             }
             Button(
                 onClick = viewModel::onSendTapped,
@@ -630,7 +689,14 @@ object CanvasTags {
 
     // Stage 7 one-tap ask surfaces.
     const val ADD_NOTE = "canvas_add_note"
+    const val NOTE_LABEL = "canvas_note_label"
     const val INSTRUCTION_ANNOTATE = "canvas_instruction_annotate"
+
+    // Stage 11 canvas top bar (Library flow).
+    const val BACK = "canvas_back"
+    const val TITLE = "canvas_title"
+    const val TITLE_FIELD = "canvas_title_field"
+    const val TITLE_SAVE = "canvas_title_save"
 
     // Stage 10 job-type picker.
     const val INSTRUCTION_ASK = "canvas_instruction_ask"

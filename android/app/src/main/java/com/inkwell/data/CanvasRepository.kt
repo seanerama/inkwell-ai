@@ -17,6 +17,10 @@ data class CanvasState(
     val widthCu: Int,
     val heightCu: Int,
     val strokes: List<StrokeEntity>,
+    // Stage 11: the canvas title (shown/edited in the canvas top bar) and the folder it
+    // lives in (null = space root), so Back returns to the folder it was opened from.
+    val title: String = "",
+    val folderId: String? = null,
 )
 
 /**
@@ -49,7 +53,35 @@ class CanvasRepository(
             widthCu = canvas.widthCu,
             heightCu = canvas.heightCu,
             strokes = strokes,
+            title = canvas.title,
+            folderId = canvas.folderId,
         )
+    }
+
+    /**
+     * Open a specific canvas by id (Stage 11 Library flow): ensure it has a `user`/`ink`
+     * layer, then load the canvas + its strokes. Returns null when no such canvas exists.
+     * The flag-OFF path keeps using [openDefaultCanvas]; this is the tile-open path.
+     */
+    suspend fun openCanvas(canvasId: String): CanvasState? {
+        val canvas = canvasDao.byId(canvasId) ?: return null
+        val inkLayer = ensureInkLayer(canvas.id)
+        val strokes = strokeDao.forLayer(inkLayer.id)
+        return CanvasState(
+            spaceId = canvas.spaceId,
+            canvasId = canvas.id,
+            inkLayerId = inkLayer.id,
+            widthCu = canvas.widthCu,
+            heightCu = canvas.heightCu,
+            strokes = strokes,
+            title = canvas.title,
+            folderId = canvas.folderId,
+        )
+    }
+
+    /** Rename a canvas (Stage 11 title edit); bumps `updated_at` via the injected clock. */
+    suspend fun renameCanvas(canvasId: String, title: String) {
+        canvasDao.rename(canvasId, title, clock())
     }
 
     suspend fun loadStrokes(layerId: String): List<StrokeEntity> = strokeDao.forLayer(layerId)
@@ -74,6 +106,13 @@ class CanvasRepository(
 
     /** Remove a stroke by id (undo-last-stroke and eraser). */
     suspend fun deleteStroke(id: String) = strokeDao.deleteById(id)
+
+    /**
+     * Ensure the single seeded space exists and return its id (Stage 11 Library flow).
+     * Reuses [ensureDefaultSpace] so the Library and the flag-OFF canvas path share one
+     * seeded space rather than each creating its own.
+     */
+    suspend fun ensureSeededSpaceId(): String = ensureDefaultSpace().id
 
     private suspend fun ensureDefaultSpace(): SpaceEntity {
         spaceDao.all().firstOrNull()?.let { return it }

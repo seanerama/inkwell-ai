@@ -72,6 +72,12 @@ class CanvasViewModel(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
     /** The canvas exporter (contract coordinate-mapping); injectable so `send()` is JVM-testable. */
     private val exporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result = CanvasExporter::export,
+    /**
+     * Stage 11: when true (the flag-OFF / legacy path) the ViewModel opens the default
+     * canvas on creation. With the Library ([BuildConfig.LIBRARY]) on, MainActivity drives
+     * [openCanvas] for a chosen tile instead, so this is set false to avoid a wasted load.
+     */
+    private val autoOpenDefault: Boolean = true,
 ) : ViewModel() {
 
     var tool by mutableStateOf("pen")
@@ -87,11 +93,22 @@ class CanvasViewModel(
     var ready by mutableStateOf(false)
         private set
 
+    /** Stage 11: the current canvas title, shown/edited in the canvas top bar. */
+    var title by mutableStateOf("")
+        private set
+
     /** Committed strokes in insertion order; the last is what undo removes. */
     val strokes: SnapshotStateList<RenderStroke> = mutableStateListOf()
 
     private var inkLayerId: String? = null
     private var canvasId: String? = null
+
+    /** Stage 11: the folder the open canvas lives in (null = root), for Back navigation. */
+    var currentFolderId: String? = null
+        private set
+
+    /** Stage 11: the id of the open canvas (null until loaded), for thumbnail rendering. */
+    val currentCanvasId: String? get() = canvasId
 
     // --- Stage 6: send/poll/render loop state (SPEC §9.4) ---
 
@@ -187,16 +204,10 @@ class CanvasViewModel(
         get() = if (fixtureVisible) DebugFixtures.annotations else emptyList()
 
     init {
-        viewModelScope.launch {
-            val state = repository.openDefaultCanvas()
-            inkLayerId = state.inkLayerId
-            canvasId = state.canvasId
-            canvasWidth = state.widthCu
-            canvasHeight = state.heightCu
-            strokes.clear()
-            strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
-            refreshLayerRows()
-            ready = true
+        if (autoOpenDefault) {
+            viewModelScope.launch {
+                applyState(repository.openDefaultCanvas())
+            }
         }
         // Observe connectivity so Send disables/enables and a reconnect flushes the queue.
         viewModelScope.launch {
@@ -206,6 +217,43 @@ class CanvasViewModel(
                 if (isOnline && !was) flushOfflineQueue()
             }
         }
+    }
+
+    /** Apply a loaded [com.inkwell.data.CanvasState] to the screen state. */
+    private fun applyState(state: com.inkwell.data.CanvasState) {
+        inkLayerId = state.inkLayerId
+        canvasId = state.canvasId
+        currentFolderId = state.folderId
+        title = state.title
+        canvasWidth = state.widthCu
+        canvasHeight = state.heightCu
+        strokes.clear()
+        strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
+        refreshLayerRows()
+        ready = true
+    }
+
+    /**
+     * Stage 11 (Library flow): open a specific canvas by id and load its strokes. Resets
+     * any transient send/panel state so the newly opened canvas starts clean.
+     */
+    fun openCanvas(canvasId: String) {
+        if (this.canvasId == canvasId && ready) return
+        ready = false
+        panel = null
+        agentAnnotations = emptyList()
+        viewModelScope.launch {
+            repository.openCanvas(canvasId)?.let { applyState(it) }
+        }
+    }
+
+    /** Stage 11: rename the open canvas (top-bar title edit); persists via the repository. */
+    fun renameCanvas(newTitle: String) {
+        val id = canvasId ?: return
+        val trimmed = newTitle.trim()
+        if (trimmed.isEmpty() || trimmed == title) return
+        title = trimmed
+        viewModelScope.launch { repository.renameCanvas(id, trimmed) }
     }
 
     fun selectTool(value: String) { tool = value }

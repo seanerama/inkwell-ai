@@ -5,6 +5,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.inkwell.data.InkDatabase
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -63,6 +64,64 @@ class InkDatabaseMigrationTest {
         db.query("SELECT state FROM card_states WHERE id = 'card-1'").use { c ->
             c.moveToFirst()
             assertEquals("done", c.getString(0))
+        }
+        db.close()
+    }
+
+    @Test
+    @Throws(IOException::class)
+    fun migrate2To3_keepsStrokes_andAddsFoldersAndCanvasColumns() {
+        // Create the v2 database and write one layer, one stroke, and one canvas.
+        val strokeBlob = byteArrayOf(0x01, 0x02, 0x03, 0x04)
+        helper.createDatabase(testDb, 2).apply {
+            execSQL(
+                "INSERT INTO canvases (id, space_id, title, width_cu, height_cu, created_at, updated_at, origin) " +
+                    "VALUES ('canvas-1', 'space-1', 'Topology', 2480, 3508, 1, 1, 'user')",
+            )
+            execSQL(
+                "INSERT INTO layers (id, canvas_id, z, owner, type, visible, opacity, job_id, created_at) " +
+                    "VALUES ('layer-1', 'canvas-1', 0, 'user', 'ink', 1, 1.0, NULL, 1)",
+            )
+            val cv = android.content.ContentValues().apply {
+                put("id", "stroke-1")
+                put("layer_id", "layer-1")
+                put("tool", "pen")
+                put("color", "#111111")
+                put("width_cu", 3.0)
+                put("points", strokeBlob)
+                put("point_count", 1)
+                put("bbox_x", 0.0)
+                put("bbox_y", 0.0)
+                put("bbox_w", 1.0)
+                put("bbox_h", 1.0)
+                put("created_at", 1L)
+            }
+            insert("strokes", android.database.sqlite.SQLiteDatabase.CONFLICT_REPLACE, cv)
+            close()
+        }
+
+        // Run the real v2 → v3 migration and validate against the exported v3 schema.
+        val db = helper.runMigrationsAndValidate(testDb, 3, true, InkDatabase.MIGRATION_2_3)
+
+        // The stroke written under v2 survives byte-for-byte (additive migration, no loss).
+        db.query("SELECT points FROM strokes WHERE id = 'stroke-1'").use { c ->
+            c.moveToFirst()
+            assertArrayEquals(strokeBlob, c.getBlob(0))
+        }
+        // The existing canvas is still there and stays at the root (folder_id NULL, undeleted).
+        db.query("SELECT folder_id, deleted_at FROM canvases WHERE id = 'canvas-1'").use { c ->
+            c.moveToFirst()
+            assertEquals(true, c.isNull(0))
+            assertEquals(true, c.isNull(1))
+        }
+        // The new folders table exists and is writable.
+        db.execSQL(
+            "INSERT INTO folders (id, space_id, parent_id, name, created_at, updated_at, deleted_at) " +
+                "VALUES ('folder-1', 'space-1', NULL, 'Network', 2, 2, NULL)",
+        )
+        db.query("SELECT name FROM folders WHERE id = 'folder-1'").use { c ->
+            c.moveToFirst()
+            assertEquals("Network", c.getString(0))
         }
         db.close()
     }
