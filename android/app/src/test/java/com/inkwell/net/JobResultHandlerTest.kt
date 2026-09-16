@@ -77,6 +77,10 @@ class JobResultHandlerTest {
         assertFalse(outcome.isError)
         assertEquals("Highlighted the middle box.", outcome.summary)
         assertEquals(listOf("The middle box"), outcome.cardTitles)
+        // Stage 7: the full card (kind, title, body) is surfaced for the panel.
+        assertEquals(1, outcome.cards.size)
+        assertEquals(com.inkwell.contracts.CardKind.ANSWER, outcome.cards[0].kind)
+        assertEquals("It is the key step.", outcome.cards[0].body)
         assertEquals(1, outcome.annotations.size)
         // Exactly one insert; the created layer is an agent/annotation layer linked to the job.
         assertEquals(1, dao.upsertCount)

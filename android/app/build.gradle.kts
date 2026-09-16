@@ -64,6 +64,13 @@ android {
             // the app has no purpose with ink off. When OFF the launch screen is the
             // settings/pairing screen instead of the canvas.
             buildConfigField("boolean", "INK_ENABLED", "true")
+            // One-tap ask kill-switch (Stage 7 dark-launch flag, THIS stage's feature):
+            // Send posts `canvas.ask` with no instruction; OFF restores the Stage-6
+            // sheet-first `canvas.annotate` flow. Documented exception (stage-7 spec,
+            // Acceptance): default ON in debug AND release, because prod is not
+            // promoted, staging is the only environment, and the server-side
+            // AGENT_ENABLED already dark-launches all agent work.
+            buildConfigField("boolean", "ONE_TAP_ASK", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -77,6 +84,10 @@ android {
             // three-box Handoff test runs on the signed release APK; prod is not promoted.
             buildConfigField("boolean", "SEND_ENABLED", "true")
             buildConfigField("boolean", "INK_ENABLED", "true")
+            // Stage 7 one-tap ask: ON in release by documented exception (see the debug
+            // block and the stage-7 spec). Flip to "false" to fall back to the Stage-6
+            // sheet-first annotate flow without a code change.
+            buildConfigField("boolean", "ONE_TAP_ASK", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

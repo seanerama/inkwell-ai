@@ -41,7 +41,7 @@ object DebugFixtures {
 }
 """
 
-    /** The fixture's annotations (AnnotationRenderer draws the highlight; rest ignored this stage). */
+    /** The fixture's annotations: highlight/text/underline drawn natively, the rest as labelled fallback rects. */
     val annotations: List<Annotation> by lazy {
         AgentOutputContract.parse(VALID_FULL_VOCABULARY_JSON).annotations
     }

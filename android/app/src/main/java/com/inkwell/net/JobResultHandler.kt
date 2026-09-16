@@ -3,6 +3,7 @@ package com.inkwell.net
 import com.inkwell.contracts.AgentOutput
 import com.inkwell.contracts.AgentOutputContract
 import com.inkwell.contracts.Annotation
+import com.inkwell.contracts.Card
 import com.inkwell.contracts.CardKind
 import com.inkwell.data.LayerEntity
 import com.inkwell.data.LayerRepository
@@ -15,8 +16,8 @@ data class LoopOutcome(
     val status: String,
     /** done: the agent summary shown in the side panel; null on failure. */
     val summary: String?,
-    /** done: card titles rendered as plain text this stage; empty otherwise. */
-    val cardTitles: List<String>,
+    /** done: the agent's cards (`kind`, `title`, `body`) for the panel; empty otherwise. */
+    val cards: List<Card>,
     /** done: annotations to render through [com.inkwell.render.AnnotationRenderer]. */
     val annotations: List<Annotation>,
     /** done: the single agent layer that was created; null when none was created. */
@@ -26,15 +27,18 @@ data class LoopOutcome(
     /** failed: the error card body (Markdown); shown in the panel, no layer rendered. */
     val errorBody: String?,
     val isError: Boolean,
-)
+) {
+    /** Card titles only (the Stage-6 surface), derived from [cards]. */
+    val cardTitles: List<String> get() = cards.map { it.title }
+}
 
 /**
  * Turns a terminal [Job] into a [LoopOutcome], applying SPEC §9.4:
  *
  *  - **done**: parse the `agent-output` result (contract `agent-output`), create
  *    **exactly one** agent layer via [LayerRepository.createAgentLayer] (insert-only —
- *    an agent layer is never mutated after creation), and surface the summary, card
- *    titles, and annotations for the panel and the renderer.
+ *    an agent layer is never mutated after creation), and surface the summary, cards
+ *    (kind/title/body), and annotations for the panel and the renderer.
  *  - **failed** (or any non-`done` terminal): surface the error card body and create
  *    **no** layer.
  *
@@ -54,7 +58,7 @@ class JobResultHandler(private val layerRepository: LayerRepository) {
         return LoopOutcome(
             status = "done",
             summary = output?.summary ?: "",
-            cardTitles = output?.cards?.map { it.title } ?: emptyList(),
+            cards = output?.cards ?: emptyList(),
             annotations = output?.annotations ?: emptyList(),
             agentLayer = layer,
             errorTitle = null,
@@ -71,7 +75,7 @@ class JobResultHandler(private val layerRepository: LayerRepository) {
         return LoopOutcome(
             status = job.status,
             summary = null,
-            cardTitles = emptyList(),
+            cards = emptyList(),
             annotations = emptyList(),
             agentLayer = null, // no layer on failure
             errorTitle = errorCard?.title ?: "Job ${job.status}",

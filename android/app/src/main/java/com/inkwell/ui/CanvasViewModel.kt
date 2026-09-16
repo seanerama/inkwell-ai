@@ -48,7 +48,15 @@ class CanvasViewModel(
     private val offlineQueue: OfflineJobQueue = OfflineJobQueue(),
     /** The kill-switch: Send is only present when this is true (release default OFF). */
     val sendEnabled: Boolean = BuildConfig.SEND_ENABLED,
+    /**
+     * Stage 7 kill-switch: ON → Send is one tap and posts `canvas.ask` with no
+     * instruction (the note is optional, behind "Add a note…"); OFF → the Stage-6
+     * sheet-first `canvas.annotate` flow.
+     */
+    val oneTapAsk: Boolean = BuildConfig.ONE_TAP_ASK,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** The canvas exporter (contract coordinate-mapping); injectable so `send()` is JVM-testable. */
+    private val exporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result = CanvasExporter::export,
 ) : ViewModel() {
 
     var tool by mutableStateOf("pen")
@@ -76,11 +84,11 @@ class CanvasViewModel(
     var online by mutableStateOf(connectivity.isOnline())
         private set
 
-    /** Whether the instruction sheet is showing. */
+    /** Whether the note/instruction sheet is showing. */
     var showInstruction by mutableStateOf(false)
         private set
 
-    /** The typed instruction (SPEC §9.4 step 1). */
+    /** The typed note/instruction (SPEC §9.4 step 1). Optional for `canvas.ask`. */
     var instruction by mutableStateOf("")
         private set
 
@@ -96,7 +104,7 @@ class CanvasViewModel(
     var panel by mutableStateOf<PanelModel?>(null)
         private set
 
-    /** Annotations currently rendered on the agent layer (highlight this stage). */
+    /** Annotations currently rendered on the agent layer (every type: native or fallback). */
     var agentAnnotations by mutableStateOf<List<Annotation>>(emptyList())
         private set
 
@@ -233,8 +241,19 @@ class CanvasViewModel(
         fixtureVisible = !fixtureVisible
     }
 
-    // --- Stage 6: send flow (SPEC §9.4) ---
+    // --- Stage 6/7: send flow (SPEC §9.4) ---
 
+    /**
+     * The **Send** button. Stage 7 (`oneTapAsk`): one tap sends `canvas.ask` with no
+     * instruction — no sheet. Kill-switch OFF: the Stage-6 behaviour, open the
+     * instruction sheet first.
+     */
+    fun onSendTapped() {
+        if (!sendEnabled) return
+        if (oneTapAsk) send() else openInstruction()
+    }
+
+    /** "Add a note…" (Stage 7) / the Stage-6 sheet: open the note/instruction sheet. */
     fun openInstruction() {
         if (!sendEnabled) return
         sendStatus = null
@@ -245,7 +264,7 @@ class CanvasViewModel(
 
     fun onInstructionChange(value: String) { instruction = value }
 
-    /** The feel-test preset (SPEC Phase 1 acceptance). */
+    /** The feel-test preset (SPEC Phase 1 acceptance); used by the Stage-6 sheet. */
     fun usePreset() { instruction = PRESET_INSTRUCTION }
 
     /** Layer-tray: toggle the agent layer's visibility so placement can be judged. */
@@ -257,11 +276,34 @@ class CanvasViewModel(
     fun toggleLayerTray() { showLayerTray = !showLayerTray }
 
     /**
-     * Send flow (SPEC §9.4): export the canvas, build the `canvas.annotate` body, then
+     * The primary send (SPEC §9.4, Stage 7). With `oneTapAsk` it posts `canvas.ask`
+     * with the typed note as `instruction`, or **no instruction at all** when the note
+     * is blank — the agent reads the note and responds; there is no preset fallback
+     * for ask. With the kill-switch OFF it is the Stage-6 send: `canvas.annotate` with
+     * the typed text, or the feel-test preset when blank.
+     */
+    fun send() {
+        if (oneTapAsk) {
+            submit(type = "canvas.ask", instr = instruction.trim().ifBlank { null })
+        } else {
+            submit(type = "canvas.annotate", instr = instruction.ifBlank { PRESET_INSTRUCTION })
+        }
+    }
+
+    /**
+     * "Mark it up instead" (the Stage-6 flow, now inside the note sheet): posts
+     * `canvas.annotate` with the typed text, or the feel-test preset when blank.
+     */
+    fun sendAnnotate() {
+        submit(type = "canvas.annotate", instr = instruction.trim().ifBlank { PRESET_INSTRUCTION })
+    }
+
+    /**
+     * Send flow (SPEC §9.4): export the canvas, build the job body for [type], then
      * either enqueue it (offline) or drive the loop to a terminal state and apply the
      * result. Never locks the UI — the caller keeps drawing while this runs.
      */
-    fun send() {
+    private fun submit(type: String, instr: String?) {
         if (!sendEnabled) return
         showInstruction = false
         val cId = canvasId ?: run { sendStatus = "Canvas not ready yet."; return }
@@ -270,13 +312,14 @@ class CanvasViewModel(
             return
         }
         val layerRepo = layerRepository ?: run { sendStatus = "Layer store unavailable."; return }
-        val instr = instruction.ifBlank { PRESET_INSTRUCTION }
+        // The note is per-send: clear it so the next one-tap Send carries no stale note.
+        instruction = ""
 
         viewModelScope.launch {
             // 1–2. Export the PNG (contract coordinate-mapping), off the main thread.
             val exportLayers = listOf(ExportLayer(z = 0, visible = true, strokes = strokes.toList()))
             val result = withContext(ioDispatcher) {
-                CanvasExporter.export(canvasWidth, canvasHeight, exportLayers)
+                exporter(canvasWidth, canvasHeight, exportLayers)
             }
             val (png, export) = when (result) {
                 is CanvasExporter.Result.Success -> result.png to result.export
@@ -293,12 +336,12 @@ class CanvasViewModel(
             if (spaceId == null) { sendStatus = "No 'work' space on the server."; return@launch }
 
             val request = JobRequestBuilder.build(
-                type = "canvas.annotate",
+                type = type,
                 spaceId = spaceId,
                 canvasId = cId,
                 pngBytes = png,
                 export = export,
-                instruction = instr,
+                instruction = instr, // null → omitted from the body (explicitNulls=false)
             )
 
             // 3. Offline: hold the job locally, flushed in order on reconnect (SPEC §9.5).
@@ -329,19 +372,19 @@ class CanvasViewModel(
             // failed: show the error card body, render NO layer.
             panel = PanelModel(
                 summary = "",
-                cardTitles = emptyList(),
+                cards = emptyList(),
                 isError = true,
                 errorTitle = outcome.errorTitle,
                 errorBody = outcome.errorBody,
             )
             return
         }
-        // done: render the highlights and open the panel with the summary + card titles.
+        // done: render every annotation and open the panel with the summary + cards.
         agentAnnotations = outcome.annotations
         agentLayerVisible = true
         panel = PanelModel(
             summary = outcome.summary ?: "",
-            cardTitles = outcome.cardTitles,
+            cards = outcome.cards.map(PanelCard::from),
             isError = false,
         )
         refreshLayerRows()
