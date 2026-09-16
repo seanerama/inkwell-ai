@@ -5,6 +5,7 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import com.inkwell.data.CanvasEntity
+import com.inkwell.data.CardStateEntity
 import com.inkwell.data.LayerEntity
 import com.inkwell.data.RasterEntity
 import com.inkwell.data.SpaceEntity
@@ -59,6 +60,18 @@ interface StrokeDao {
 
     @Query("SELECT COUNT(*) FROM strokes")
     suspend fun count(): Int
+}
+
+@Dao
+interface CardStateDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(cardState: CardStateEntity)
+
+    @Query("SELECT * FROM card_states WHERE job_id = :jobId")
+    suspend fun forJob(jobId: String): List<CardStateEntity>
+
+    @Query("SELECT * FROM card_states WHERE id = :id")
+    suspend fun byId(id: String): CardStateEntity?
 }
 
 @Dao

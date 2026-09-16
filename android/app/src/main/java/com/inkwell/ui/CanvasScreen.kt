@@ -30,6 +30,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -81,6 +82,9 @@ fun CanvasScreen(
                         InkView(ctx).apply {
                             onStrokeCommitted = { viewModel.onStrokeCommitted(it) }
                             onEraseStroke = { viewModel.onEraseStroke(it) }
+                            // Stage 10: a finger tap on an agent mark scrolls the panel to
+                            // its card (SPEC §4.7, canvas → card). Gated in the ViewModel.
+                            onAnchorTap = { xCu, yCu -> viewModel.onCanvasTapCu(xCu, yCu) }
                             this.debugEnabled = debugEnabled
                         }
                     },
@@ -95,6 +99,8 @@ fun CanvasScreen(
                         view.setAccentColor(viewModel.accentColor)
                         view.setAgentAnnotations(viewModel.agentAnnotations)
                         view.setAgentLayerVisible(viewModel.agentLayerVisible)
+                        // Stage 10: card → canvas anchor pulse (~1.5 s after a card tap).
+                        view.setAnchorPulses(viewModel.anchorPulses)
                         if (debugEnabled) {
                             view.setDebugHighlights(viewModel.fixtureAnnotations)
                         }
@@ -143,6 +149,7 @@ fun CanvasScreen(
                 viewModel.panel?.let { panel ->
                     SidePanel(
                         panel = panel,
+                        viewModel = viewModel,
                         onClose = viewModel::dismissPanel,
                         modifier = Modifier.width(320.dp).fillMaxHeight(),
                     )
@@ -155,6 +162,7 @@ fun CanvasScreen(
             viewModel.panel?.let { panel ->
                 SidePanel(
                     panel = panel,
+                    viewModel = viewModel,
                     onClose = viewModel::dismissPanel,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -178,10 +186,11 @@ fun CanvasScreen(
     }
 }
 
-/** The agent `summary` + cards (title, body as plain text), or (on failure) the error card body. */
+/** The agent `summary` + cards, or (on failure) the error card body. */
 @Composable
 private fun SidePanel(
     panel: PanelModel,
+    viewModel: CanvasViewModel,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -219,7 +228,13 @@ private fun SidePanel(
                     Spacer(Modifier.size(4.dp))
                     Text("Cards", fontWeight = FontWeight.SemiBold)
                     panel.cards.forEachIndexed { index, card ->
-                        PanelCardRow(panel = panel, index = index, card = card)
+                        PanelCardRow(
+                            viewModel = viewModel,
+                            panel = panel,
+                            index = index,
+                            card = card,
+                            selected = viewModel.selectedCardIndex == index,
+                        )
                     }
                 }
             }
@@ -228,33 +243,101 @@ private fun SidePanel(
 }
 
 /**
- * One card in the panel: the title row toggles the body. An `answer` card starts
- * expanded; every other kind starts collapsed to its title. The body is the card's
- * Markdown shown as plain text (Markdown rendering is Phase 2).
+ * One card in the panel. The title row toggles the body and (Stage 10) pulses the card's
+ * anchored canvas region (card → canvas, SPEC §4.7). An `answer` card starts expanded;
+ * every other kind starts collapsed. With [CanvasViewModel.cardActionsEnabled] the row
+ * shows the card's state and its actions — `confirm`/`reject` as live buttons, every
+ * other kind disabled with "coming later" — and the body renders as Markdown; otherwise
+ * the Stage-7 read-only body (plain text) is shown. A [selected] card (from a canvas mark
+ * tap) is force-expanded.
  */
 @Composable
-private fun PanelCardRow(panel: PanelModel, index: Int, card: PanelCard) {
+private fun PanelCardRow(
+    viewModel: CanvasViewModel,
+    panel: PanelModel,
+    index: Int,
+    card: PanelCard,
+    selected: Boolean,
+) {
     var expanded by remember(panel, index) { mutableStateOf(card.expandedByDefault) }
+    // Canvas → card: a tap on the mark expands and scrolls the panel to this card.
+    LaunchedEffect(selected) {
+        if (selected) {
+            expanded = true
+            viewModel.onCardSelectionConsumed()
+        }
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { expanded = !expanded }
+            .clickable {
+                expanded = !expanded
+                viewModel.onCardTapped(card) // card → canvas anchor pulse
+            }
             .testTag(CanvasTags.panelCard(index)),
     ) {
-        Text(
-            text = (if (expanded) "▾ " else "▸ ") + card.title,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.testTag(CanvasTags.panelCardTitle(index)),
-        )
-        if (expanded && card.body.isNotBlank()) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = card.body,
-                modifier = Modifier
-                    .padding(start = 16.dp, top = 2.dp)
-                    .testTag(CanvasTags.panelCardBody(index)),
+                text = (if (expanded) "▾ " else "▸ ") + card.title,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f).testTag(CanvasTags.panelCardTitle(index)),
             )
+            if (viewModel.cardActionsEnabled) {
+                CardStateChip(state = card.state, tag = CanvasTags.panelCardState(index))
+            }
+        }
+        if (expanded && card.body.isNotBlank()) {
+            val bodyModifier = Modifier
+                .padding(start = 16.dp, top = 2.dp)
+                .testTag(CanvasTags.panelCardBody(index))
+            if (viewModel.cardActionsEnabled) {
+                Text(text = markdownToAnnotatedString(card.body), modifier = bodyModifier)
+            } else {
+                Text(text = card.body, modifier = bodyModifier)
+            }
+        }
+        if (expanded && viewModel.cardActionsEnabled && card.actions.isNotEmpty()) {
+            Row(
+                modifier = Modifier.padding(start = 16.dp, top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                card.actions.forEachIndexed { ai, action ->
+                    val tag = CanvasTags.panelCardAction(index, ai)
+                    if (action.supported) {
+                        Button(
+                            onClick = { viewModel.onCardAction(card, action) },
+                            modifier = Modifier.testTag(tag),
+                        ) { Text(action.label) }
+                    } else {
+                        OutlinedButton(
+                            onClick = {},
+                            enabled = false,
+                            modifier = Modifier.testTag(tag),
+                        ) { Text("${action.label} — coming later") }
+                    }
+                }
+            }
         }
     }
+}
+
+/** A small state pill for a card: open / done / dismissed. */
+@Composable
+private fun CardStateChip(state: String, tag: String) {
+    val bg = when (state) {
+        "done" -> Color(0xFF2E7D32)
+        "dismissed" -> Color(0xFF9E9E9E)
+        else -> Color(0xFF1B6EF3)
+    }
+    Text(
+        text = state,
+        color = Color.White,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(bg)
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            .testTag(tag),
+    )
 }
 
 /** Minimal layer tray: list layers with a per-layer visibility toggle. */
@@ -293,25 +376,58 @@ private fun LayerTray(viewModel: CanvasViewModel, modifier: Modifier = Modifier)
  */
 @Composable
 private fun InstructionDialog(viewModel: CanvasViewModel) {
+    val cardActions = viewModel.cardActionsEnabled
     val oneTap = viewModel.oneTapAsk
     androidx.compose.material3.AlertDialog(
         onDismissRequest = viewModel::dismissInstruction,
-        title = { Text(if (oneTap) "Add a note" else "Send to agent") },
+        title = { Text(if (cardActions) "Send to agent" else if (oneTap) "Add a note" else "Send to agent") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (cardActions) {
+                    // Stage 10 job-type picker: Ask / Mark up (the rest are Phase 3+).
+                    Text("Job type", fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SegmentedChoice(
+                            label = "Ask",
+                            selected = viewModel.jobType == "ask",
+                            tag = CanvasTags.INSTRUCTION_ASK,
+                        ) { viewModel.selectJobType("ask") }
+                        SegmentedChoice(
+                            label = "Mark up",
+                            selected = viewModel.jobType == "annotate",
+                            tag = CanvasTags.INSTRUCTION_MARKUP,
+                        ) { viewModel.selectJobType("annotate") }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Formalize", "Extract", "Action").forEach { label ->
+                            OutlinedButton(onClick = {}, enabled = false) { Text(label) }
+                        }
+                    }
+                    Text("Formalize / Extract / Action — Phase 3+", color = Color(0xFF9E9E9E))
+                }
                 OutlinedTextField(
                     value = viewModel.instruction,
                     onValueChange = viewModel::onInstructionChange,
-                    label = { Text(if (oneTap) "Note for the agent (optional)" else "Instruction") },
+                    label = {
+                        Text(
+                            if (cardActions) {
+                                if (viewModel.jobType == "annotate") "Instruction (optional)" else "Note for the agent (optional)"
+                            } else if (oneTap) {
+                                "Note for the agent (optional)"
+                            } else {
+                                "Instruction"
+                            },
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth().testTag(CanvasTags.INSTRUCTION_FIELD),
                 )
-                if (oneTap) {
+                if (!cardActions && oneTap) {
                     TextButton(
                         onClick = viewModel::sendAnnotate,
                         enabled = viewModel.online,
                         modifier = Modifier.testTag(CanvasTags.INSTRUCTION_ANNOTATE),
                     ) { Text("Mark it up instead") }
-                } else {
+                } else if (!cardActions) {
                     TextButton(
                         onClick = viewModel::usePreset,
                         modifier = Modifier.testTag(CanvasTags.INSTRUCTION_PRESET),
@@ -324,15 +440,25 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
         },
         confirmButton = {
             Button(
-                onClick = viewModel::send,
+                onClick = { if (cardActions) viewModel.onSendTapped() else viewModel.send() },
                 enabled = viewModel.online,
                 modifier = Modifier.testTag(CanvasTags.INSTRUCTION_SEND),
-            ) { Text("Send") }
+            ) { Text(if (cardActions) viewModel.sendLabel else "Send") }
         },
         dismissButton = {
             TextButton(onClick = viewModel::dismissInstruction) { Text("Cancel") }
         },
     )
+}
+
+/** A segmented-control choice (selected → filled Button, else OutlinedButton). */
+@Composable
+private fun SegmentedChoice(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    if (selected) {
+        Button(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(label) }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(label) }
+    }
 }
 
 /** Debug-only dialog showing the exported PNG and its dimensions (or an error). */
@@ -422,7 +548,9 @@ private fun Toolbar(
                 onClick = viewModel::toggleLayerTray,
                 modifier = Modifier.testTag(CanvasTags.LAYERS),
             ) { Text("Layers") }
-            if (viewModel.oneTapAsk) {
+            // The note sheet is reachable whenever one-tap ask OR the Stage-10 picker is on
+            // (the picker lives inside the sheet).
+            if (viewModel.oneTapAsk || viewModel.cardActionsEnabled) {
                 IconButton(
                     onClick = viewModel::openInstruction,
                     enabled = viewModel.online,
@@ -433,7 +561,7 @@ private fun Toolbar(
                 onClick = viewModel::onSendTapped,
                 enabled = viewModel.online,
                 modifier = Modifier.testTag(CanvasTags.SEND),
-            ) { Text(if (viewModel.online) "Send" else "Offline") }
+            ) { Text(viewModel.sendLabel) }
         }
 
         OutlinedButton(
@@ -504,8 +632,17 @@ object CanvasTags {
     const val ADD_NOTE = "canvas_add_note"
     const val INSTRUCTION_ANNOTATE = "canvas_instruction_annotate"
 
+    // Stage 10 job-type picker.
+    const val INSTRUCTION_ASK = "canvas_instruction_ask"
+    const val INSTRUCTION_MARKUP = "canvas_instruction_markup"
+
     fun color(index: Int) = "canvas_color_$index"
     fun panelCard(index: Int) = "canvas_panel_card_$index"
     fun panelCardTitle(index: Int) = "canvas_panel_card_title_$index"
     fun panelCardBody(index: Int) = "canvas_panel_card_body_$index"
+
+    // Stage 10 card state + actions.
+    fun panelCardState(index: Int) = "canvas_panel_card_state_$index"
+    fun panelCardAction(cardIndex: Int, actionIndex: Int) =
+        "canvas_panel_card_action_${cardIndex}_$actionIndex"
 }

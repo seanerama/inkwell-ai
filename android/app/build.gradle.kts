@@ -81,6 +81,16 @@ android {
             // dark-launches all agent work. Flip to "false" to restore the labelled boxes
             // without a code change.
             buildConfigField("boolean", "FULL_VOCABULARY", "true")
+            // Card-actions kill-switch (Stage 10 dark-launch flag, THIS stage's feature):
+            // ON makes cards real objects — action buttons (confirm/reject), device-driven
+            // state changes, tappable anchors, Markdown bodies, and the Ask/Mark-up
+            // job-type picker. OFF restores the Stage-7 read-only cards (no action
+            // buttons, no state changes, no picker). Documented exception (same rationale
+            // as ONE_TAP_ASK/FULL_VOCABULARY): default ON in debug AND release, because
+            // prod is not promoted, staging is the only environment, and AGENT_ENABLED
+            // already dark-launches all agent work. Flip to "false" to restore read-only
+            // cards without a code change.
+            buildConfigField("boolean", "CARD_ACTIONS", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -102,6 +112,10 @@ android {
             // debug block and the stage-9 spec). Flip to "false" to fall back to the
             // Stage-7 labelled boxes for the six non-native types without a code change.
             buildConfigField("boolean", "FULL_VOCABULARY", "true")
+            // Stage 10 card actions: ON in release by documented exception (see the debug
+            // block and the stage-10 spec). Flip to "false" to fall back to the Stage-7
+            // read-only cards (no action buttons, no state changes, no picker).
+            buildConfigField("boolean", "CARD_ACTIONS", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {
@@ -137,6 +151,11 @@ android {
     sourceSets {
         getByName("main") {
             kotlin.srcDir("src/contracts/kotlin")
+        }
+        // Room's exported schemas as androidTest assets so MigrationTestHelper can load
+        // them (Stage 10 v1→v2 migration test). Additive; no effect on the app APK.
+        getByName("androidTest") {
+            assets.srcDirs("$projectDir/schemas")
         }
     }
 

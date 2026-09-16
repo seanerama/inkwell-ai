@@ -2,6 +2,7 @@ package com.inkwell.net
 
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -32,4 +33,15 @@ interface DeviceApi {
     /** `cursor` is passed back verbatim (opaque, contract device-api §Sync cursor). */
     @GET("v1/sync")
     suspend fun sync(@Query("cursor") cursor: String? = null): SyncResponse
+
+    /** Stage 10: change a card's state (open|done|dismissed) → the updated card. */
+    @PATCH("v1/cards/{id}")
+    suspend fun patchCard(@Path("id") id: String, @Body body: CardStateRequest): CardResponse
+
+    /** Stage 10: invoke a card action by its id → the updated card. */
+    @POST("v1/cards/{id}/actions/{action_id}")
+    suspend fun runCardAction(
+        @Path("id") id: String,
+        @Path("action_id") actionId: String,
+    ): CardResponse
 }

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.inkwell.BuildConfig
 import com.inkwell.contracts.Annotation
 import com.inkwell.data.CanvasRepository
+import com.inkwell.data.CardStatePersistence
 import com.inkwell.data.LayerRepository
 import com.inkwell.data.StrokeCommitData
 import com.inkwell.ink.StrokeCommit
@@ -21,6 +22,7 @@ import com.inkwell.net.JobResultHandler
 import com.inkwell.net.JobRequestBuilder
 import com.inkwell.net.LoopController
 import com.inkwell.net.OfflineJobQueue
+import com.inkwell.render.AnchorHitTest
 import com.inkwell.render.AnnotationRenderer
 import com.inkwell.render.CanvasExporter
 import com.inkwell.render.ExportLayer
@@ -28,6 +30,7 @@ import com.inkwell.render.RenderStroke
 import com.inkwell.render.StrokeMapper
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -54,6 +57,18 @@ class CanvasViewModel(
      * sheet-first `canvas.annotate` flow.
      */
     val oneTapAsk: Boolean = BuildConfig.ONE_TAP_ASK,
+    /**
+     * Stage 10 kill-switch: ON → cards are real objects (action buttons, device-driven
+     * state, tappable anchors, Markdown bodies, and the Ask/Mark-up job-type picker);
+     * OFF → the Stage-7 read-only cards. Default from [BuildConfig.CARD_ACTIONS].
+     */
+    val cardActionsEnabled: Boolean = BuildConfig.CARD_ACTIONS,
+    /** Loads the last chosen job type ("ask"/"annotate"); persisted per the picker. */
+    private val loadJobType: () -> String = { "ask" },
+    /** Persists the chosen job type (Stage 10 picker remembers the last choice). */
+    private val saveJobType: (String) -> Unit = {},
+    /** Per-card state persistence (Room-backed in the app; null in lightweight tests). */
+    private val cardStatePersistence: CardStatePersistence? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
     /** The canvas exporter (contract coordinate-mapping); injectable so `send()` is JVM-testable. */
     private val exporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result = CanvasExporter::export,
@@ -118,6 +133,37 @@ class CanvasViewModel(
 
     /** Rows for the layer tray (ink + any agent layers). */
     val layerRows: SnapshotStateList<LayerRow> = mutableStateListOf()
+
+    // --- Stage 10: job-type picker, card actions/state, and anchor interaction ---
+
+    /** The chosen job type for the primary Send: "ask" (canvas.ask) or "annotate". */
+    var jobType by mutableStateOf(if (cardActionsEnabled) loadJobType() else "ask")
+        private set
+
+    /** The primary Send button label follows the picker: "Send" for ask, "Mark up" for annotate. */
+    val sendLabel: String
+        get() = when {
+            !online -> "Offline"
+            cardActionsEnabled && jobType == "annotate" -> "Mark up"
+            else -> "Send"
+        }
+
+    /** The terminal job whose cards the panel is showing (needed to change card state). */
+    private var currentJobId: String? = null
+
+    /** Agent annotations indexed by id, for anchor hit-testing (both directions, §4.7). */
+    private var annotationsById: Map<String, Annotation> = emptyMap()
+
+    /** CU rects `[x,y,w,h]` currently pulsing on the canvas after a card tap (~1.5 s). */
+    var anchorPulses by mutableStateOf<List<DoubleArray>>(emptyList())
+        private set
+
+    /** The card index the panel should expand + scroll to after a canvas mark tap. */
+    var selectedCardIndex by mutableStateOf<Int?>(null)
+        private set
+
+    /** Monotonic token so a newer card tap cancels an older pulse's auto-clear. */
+    private var pulseToken = 0
 
     /** The resolved server `work` space id (looked up by slug, cached per session). */
     private var workSpaceId: String? = null
@@ -250,7 +296,33 @@ class CanvasViewModel(
      */
     fun onSendTapped() {
         if (!sendEnabled) return
-        if (oneTapAsk) send() else openInstruction()
+        if (cardActionsEnabled) {
+            sendByJobType()
+        } else if (oneTapAsk) {
+            send()
+        } else {
+            openInstruction()
+        }
+    }
+
+    /** Stage 10 picker: remember the choice; the Send label follows it. */
+    fun selectJobType(type: String) {
+        if (type != "ask" && type != "annotate") return // formalize/extract/action are Phase 3+
+        jobType = type
+        saveJobType(type)
+    }
+
+    /**
+     * Stage 10 one-tap send honouring the job-type picker: "ask" posts `canvas.ask`
+     * (typed note, or none when blank); "annotate" posts `canvas.annotate` (typed note,
+     * or the feel-test preset when blank).
+     */
+    fun sendByJobType() {
+        if (jobType == "annotate") {
+            submit(type = "canvas.annotate", instr = instruction.trim().ifBlank { PRESET_INSTRUCTION })
+        } else {
+            submit(type = "canvas.ask", instr = instruction.trim().ifBlank { null })
+        }
     }
 
     /** "Add a note…" (Stage 7) / the Stage-6 sheet: open the note/instruction sheet. */
@@ -356,7 +428,7 @@ class CanvasViewModel(
             sendStatus = null
             try {
                 val controller = LoopController(dev, JobResultHandler(layerRepo))
-                val outcome = controller.run(request, cId) { /* queued: indicator already on */ }
+                val outcome = controller.run(request, cId) { queued -> currentJobId = queued.id }
                 applyOutcome(outcome)
             } catch (e: Exception) {
                 sendStatus = "Send failed: ${e.message ?: e.javaClass.simpleName}"
@@ -381,16 +453,135 @@ class CanvasViewModel(
         }
         // done: render every annotation and open the panel with the summary + cards.
         agentAnnotations = outcome.annotations
+        annotationsById = outcome.annotations.associateBy { it.id }
         agentLayerVisible = true
+        anchorPulses = emptyList()
+        selectedCardIndex = null
+        // Prefer the server's cards (identity + state + actions) when card-actions are on;
+        // otherwise fall back to the parsed agent-output cards (Stage-7 read-only shape).
+        val panelCards = if (cardActionsEnabled && outcome.serverCards.isNotEmpty()) {
+            outcome.serverCards.map { PanelCard.from(it) }
+        } else {
+            outcome.cards.map { PanelCard.from(it) }
+        }
         panel = PanelModel(
             summary = outcome.summary ?: "",
-            cards = outcome.cards.map(PanelCard::from),
+            cards = panelCards,
             isError = false,
         )
+        // Persist the initial per-card state so a reopened canvas reflects it offline.
+        if (cardActionsEnabled) persistAllCardStates(panelCards)
         refreshLayerRows()
     }
 
-    fun dismissPanel() { panel = null }
+    fun dismissPanel() {
+        panel = null
+        anchorPulses = emptyList()
+        selectedCardIndex = null
+    }
+
+    // --- Stage 10: card actions + state (optimistic then reconcile from the server) ---
+
+    /**
+     * Invoke a card [action] (Stage 10). Supported kinds (`confirm`/`reject`) update the
+     * row **optimistically**, then reconcile from the server's returned card; on failure
+     * the optimistic change is reverted. Unsupported kinds and the OFF kill-switch no-op.
+     */
+    fun onCardAction(card: PanelCard, action: PanelAction) {
+        if (!cardActionsEnabled || !action.supported || card.id.isEmpty()) return
+        val dev = deviceRepositoryProvider() ?: run {
+            sendStatus = "Not paired — set the server URL and token in Settings."
+            return
+        }
+        val previous = card.state
+        val optimistic = CardStateReducer.optimisticState(action.kind, previous)
+        updatePanelCardState(card.id, optimistic)
+        persistCardState(card.id, optimistic)
+        viewModelScope.launch {
+            try {
+                val updated = dev.runCardAction(card.id, action.id)
+                updatePanelCardState(updated.id, updated.state)
+                persistCardState(updated.id, updated.state)
+            } catch (e: Exception) {
+                // Reconcile back to the pre-tap state (the server rejected or is unreachable).
+                updatePanelCardState(card.id, previous)
+                persistCardState(card.id, previous)
+                sendStatus = "Action failed: ${e.message ?: e.javaClass.simpleName}"
+            }
+        }
+    }
+
+    /** Replace the panel's copy of a card's state in place (by id). */
+    private fun updatePanelCardState(cardId: String, state: String) {
+        panel = panel?.let { it.copy(cards = CardStateReducer.withState(it.cards, cardId, state)) }
+    }
+
+    private fun persistCardState(cardId: String, state: String) {
+        val store = cardStatePersistence ?: return
+        val jobId = currentJobId ?: return
+        viewModelScope.launch {
+            try {
+                store.save(cardId, jobId, state, System.currentTimeMillis())
+            } catch (_: Exception) {
+                // Persistence is a convenience; a write failure never blocks the UI.
+            }
+        }
+    }
+
+    private fun persistAllCardStates(cards: List<PanelCard>) {
+        val store = cardStatePersistence ?: return
+        val jobId = currentJobId ?: return
+        viewModelScope.launch {
+            val now = System.currentTimeMillis()
+            cards.filter { it.id.isNotEmpty() }.forEach { card ->
+                try {
+                    store.save(card.id, jobId, card.state, now)
+                } catch (_: Exception) {
+                    // Ignore — best-effort offline cache.
+                }
+            }
+        }
+    }
+
+    // --- Stage 10: anchors (both directions, SPEC §4.7) ---
+
+    /**
+     * Card → canvas: tapping a card pulses a highlight over each of its anchored
+     * annotation bounds (or `region` rect) for ~1.5 s. No-op when the card has no
+     * resolvable anchors or the kill-switch is OFF.
+     */
+    fun onCardTapped(card: PanelCard) {
+        if (!cardActionsEnabled) return
+        val regions = card.anchors.map { AnchorHitTest.AnchorRegion(it.annotationId, it.region) }
+        val rects = AnchorHitTest.rectsForAnchors(regions, annotationsById, canvasWidth, canvasHeight)
+        if (rects.isEmpty()) return
+        anchorPulses = rects
+        val token = ++pulseToken
+        viewModelScope.launch {
+            delay(ANCHOR_PULSE_MS)
+            if (pulseToken == token) anchorPulses = emptyList()
+        }
+    }
+
+    /**
+     * Canvas → card: a tap at canvas-unit `(xCu, yCu)` selects the first card whose
+     * anchor bounds contain it, so the panel expands + scrolls to it. No-op when the tap
+     * hits no anchored mark.
+     */
+    fun onCanvasTapCu(xCu: Float, yCu: Float) {
+        if (!cardActionsEnabled) return
+        val cards = panel?.cards ?: return
+        val cardAnchors = cards.map { card ->
+            card.anchors.map { AnchorHitTest.AnchorRegion(it.annotationId, it.region) }
+        }
+        val index = AnchorHitTest.cardIndexForTap(
+            xCu.toDouble(), yCu.toDouble(), cardAnchors, annotationsById, canvasWidth, canvasHeight,
+        )
+        if (index != null) selectedCardIndex = index
+    }
+
+    /** The UI calls this once it has expanded/scrolled to [selectedCardIndex]. */
+    fun onCardSelectionConsumed() { selectedCardIndex = null }
 
     /** Flush offline-created jobs in insertion order when connectivity returns. */
     private fun flushOfflineQueue() {
@@ -437,6 +628,10 @@ class CanvasViewModel(
 
     companion object {
         const val DEFAULT_WIDTH_CU = 3f
+
+        /** How long a card-tap anchor pulse stays lit on the canvas (SPEC §4.7 ~1.5 s). */
+        const val ANCHOR_PULSE_MS = 1_500L
+
         val PALETTE = listOf("#111111", "#1B6EF3", "#E5484D")
 
         /** The feel-test preset instruction (SPEC Phase 1 acceptance / stage). */

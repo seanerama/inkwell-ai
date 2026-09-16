@@ -18,6 +18,13 @@ data class LoopOutcome(
     val summary: String?,
     /** done: the agent's cards (`kind`, `title`, `body`) for the panel; empty otherwise. */
     val cards: List<Card>,
+    /**
+     * The server's cards for this job (Stage 10, device-api additive `cards` field):
+     * they carry identity + state + actions the device can change. Present on both the
+     * `done` and `failed` paths (the server surfaces the error card here too), empty when
+     * the server predates the field. The UI prefers these over [cards] when non-empty.
+     */
+    val serverCards: List<CardResponse> = emptyList(),
     /** done: annotations to render through [com.inkwell.render.AnnotationRenderer]. */
     val annotations: List<Annotation>,
     /** done: the single agent layer that was created; null when none was created. */
@@ -64,6 +71,7 @@ class JobResultHandler(private val layerRepository: LayerRepository) {
             errorTitle = null,
             errorBody = null,
             isError = false,
+            serverCards = job.cards,
         )
     }
 
@@ -81,6 +89,7 @@ class JobResultHandler(private val layerRepository: LayerRepository) {
             errorTitle = errorCard?.title ?: "Job ${job.status}",
             errorBody = errorCard?.body ?: job.error ?: "The job did not complete.",
             isError = true,
+            serverCards = job.cards,
         )
     }
 

@@ -1,5 +1,6 @@
 package com.inkwell.ui
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -23,6 +24,7 @@ import com.inkwell.BuildConfig
 import com.inkwell.data.CanvasRepository
 import com.inkwell.data.InkDatabase
 import com.inkwell.data.LayerRepository
+import com.inkwell.data.RoomCardStateRepository
 import com.inkwell.net.AndroidConnectivity
 import com.inkwell.net.EncryptedTokenStore
 import com.inkwell.net.LoopServices
@@ -50,8 +52,11 @@ class MainActivity : ComponentActivity() {
             strokeDao = db.strokeDao(),
         )
         val layerRepo = LayerRepository(db.layerDao())
+        val cardStateRepo = RoomCardStateRepository(db.cardStateDao())
         val tokenStore = EncryptedTokenStore(applicationContext)
         val connectivity = AndroidConnectivity(applicationContext)
+        // Plain prefs for the Stage-10 job-type picker's last choice (not a secret).
+        val prefs = applicationContext.getSharedPreferences("inkwell_prefs", Context.MODE_PRIVATE)
         viewModelFactory {
             initializer {
                 CanvasViewModel(
@@ -61,6 +66,9 @@ class MainActivity : ComponentActivity() {
                     deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
                     connectivity = connectivity,
                     offlineQueue = LoopServices.offlineQueue,
+                    cardStatePersistence = cardStateRepo,
+                    loadJobType = { prefs.getString("job_type", "ask") ?: "ask" },
+                    saveJobType = { prefs.edit().putString("job_type", it).apply() },
                 )
             }
         }
