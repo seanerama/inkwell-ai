@@ -89,6 +89,9 @@ class InkView @JvmOverloads constructor(
     // the agent LayerEntity stays at 1.0 opacity and the transparency is never doubled.
     private var agentAnnotations: List<Annotation> = emptyList()
     private var agentLayerVisible: Boolean = true
+    // Stage 12: when the open canvas is an agent redraw (origin=agent), its agent layer is
+    // the content, so it renders opaque/ink-black rather than 70%/accent (SPEC §6.3).
+    private var agentOriginCanvas: Boolean = false
 
     // --- Stage 10: card→canvas anchor pulse (CU rects) + canvas→card tap tracking ---
     private var anchorPulses: List<DoubleArray> = emptyList()
@@ -161,6 +164,13 @@ class InkView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** Stage 12: mark the open canvas as agent-origin so the agent layer renders opaque. */
+    fun setAgentOriginCanvas(value: Boolean) {
+        if (agentOriginCanvas == value) return
+        agentOriginCanvas = value
+        invalidate()
+    }
+
     /**
      * Stage 10 (card → canvas, SPEC §4.7): the CU rects `[x,y,w,h]` to pulse as a
      * transient highlight after a card tap. Empty clears the pulse. Drawn through the
@@ -198,8 +208,10 @@ class InkView @JvmOverloads constructor(
         // Agent annotation layer (Stage 6): rendered in both debug and release when the
         // layer is visible, through AnnotationRenderer (which paints the 70% opacity).
         if (agentLayerVisible && agentAnnotations.isNotEmpty()) {
-            AnnotationRenderer(accentColor, canvasWidthCu, canvasHeightCu)
-                .draw(canvas, transform, agentAnnotations)
+            AnnotationRenderer(
+                accentColor, canvasWidthCu, canvasHeightCu,
+                agentOriginCanvas = agentOriginCanvas,
+            ).draw(canvas, transform, agentAnnotations)
         }
         // Stage 10: anchor pulse over a tapped card's region(s), through the ink transform.
         if (anchorPulses.isNotEmpty()) {

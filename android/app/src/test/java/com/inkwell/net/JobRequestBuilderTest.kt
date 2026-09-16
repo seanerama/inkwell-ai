@@ -85,6 +85,39 @@ class JobRequestBuilderTest {
         val obj = json.parseToJsonElement(json.encodeToString(JobCreateRequest.serializer(), req)).jsonObject
         assertTrue("instruction omitted", !obj.containsKey("instruction"))
         assertTrue("selection omitted", !obj.containsKey("selection"))
+        assertTrue("meta omitted", !obj.containsKey("meta"))
         assertTrue("image still present", obj.containsKey("image"))
+    }
+
+    // --- Stage 12: meta.title for canvas.formalize ---
+
+    @Test
+    fun title_is_sent_as_meta_title_for_formalize() {
+        val req = JobRequestBuilder.build(
+            type = "canvas.formalize",
+            spaceId = "s",
+            canvasId = "c",
+            pngBytes = pngBytes,
+            export = CoordinateMapping.export(),
+            title = "Topology",
+        )
+        val obj = json.parseToJsonElement(json.encodeToString(JobCreateRequest.serializer(), req)).jsonObject
+        assertEquals("Topology", obj["meta"]!!.jsonObject["title"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun blank_or_null_title_omits_meta() {
+        val nullTitle = JobRequestBuilder.build(
+            type = "canvas.formalize", spaceId = "s", canvasId = "c",
+            pngBytes = pngBytes, export = CoordinateMapping.export(), title = null,
+        )
+        val blankTitle = JobRequestBuilder.build(
+            type = "canvas.formalize", spaceId = "s", canvasId = "c",
+            pngBytes = pngBytes, export = CoordinateMapping.export(), title = "   ",
+        )
+        for (req in listOf(nullTitle, blankTitle)) {
+            val obj = json.parseToJsonElement(json.encodeToString(JobCreateRequest.serializer(), req)).jsonObject
+            assertTrue("meta omitted when no usable title", !obj.containsKey("meta"))
+        }
     }
 }

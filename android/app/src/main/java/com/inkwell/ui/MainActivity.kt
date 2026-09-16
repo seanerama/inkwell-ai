@@ -85,6 +85,9 @@ class MainActivity : ComponentActivity() {
                     connectivity = connectivity,
                     offlineQueue = LoopServices.offlineQueue,
                     cardStatePersistence = cardStateRepo,
+                    // Stage 12: the same repository materialises a Formalize redraw as a
+                    // local canvas (using the server's id) when a formalize job returns.
+                    formalizedCanvasStore = canvasRepository,
                     loadJobType = { prefs.getString("job_type", "ask") ?: "ask" },
                     saveJobType = { prefs.edit().putString("job_type", it).apply() },
                     // With the Library on, the canvas is opened per-tile via openCanvas().
@@ -170,6 +173,15 @@ class MainActivity : ComponentActivity() {
             )
         } else {
             LaunchedEffect(openId) { canvasViewModel.openCanvas(openId) }
+            // Stage 12: a Formalize redraw asks to open its new agent-origin canvas beside
+            // the source. Follow the request by switching the selected tile to the new id.
+            val pendingOpen = canvasViewModel.pendingOpenCanvasId
+            LaunchedEffect(pendingOpen) {
+                if (pendingOpen != null && pendingOpen != openId) {
+                    selectedCanvasId = pendingOpen
+                    canvasViewModel.consumePendingOpenCanvas()
+                }
+            }
             CanvasScreen(
                 viewModel = canvasViewModel,
                 onOpenSettings = onOpenSettings,

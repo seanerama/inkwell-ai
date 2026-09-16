@@ -30,6 +30,19 @@ class JobCreate(BaseModel):
     export: dict | None = None
     instruction: str | None = None
     selection: list[float] | None = None
+    meta: dict | None = None
+
+
+class CanvasOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    space_id: uuid.UUID
+    title: str
+    width_cu: int
+    height_cu: int
+    origin: str
+    created_at: datetime
 
 
 class CardOut(BaseModel):

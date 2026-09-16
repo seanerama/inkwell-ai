@@ -100,6 +100,14 @@ android {
             // because prod is not promoted, staging is the only environment. Flip to
             // "false" to restore the direct-to-canvas launch without a code change.
             buildConfigField("boolean", "LIBRARY", "true")
+            // Formalize kill-switch (Stage 12 dark-launch flag, THIS stage's feature): ON
+            // adds "Formalize" to the Ask/Mark up picker (posts canvas.formalize) and lets
+            // the redraw ride back on the polled job as a new agent-origin canvas opened
+            // beside the source. Documented exception (same rationale as
+            // ONE_TAP_ASK/FULL_VOCABULARY/CARD_ACTIONS/LIBRARY): default ON in debug AND
+            // release, because prod is not promoted, staging is the only environment. Flip
+            // to "false" to hide the Formalize option and skip the redraw handling.
+            buildConfigField("boolean", "FORMALIZE", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -129,6 +137,10 @@ android {
             // and the stage-11 spec). Flip to "false" to fall back to the direct-to-canvas
             // launch (open the first canvas) without a code change.
             buildConfigField("boolean", "LIBRARY", "true")
+            // Stage 12 Formalize: ON in release by documented exception (see the debug
+            // block and the stage-12 spec). Flip to "false" to hide the Formalize picker
+            // option and skip the redraw-to-new-canvas handling without a code change.
+            buildConfigField("boolean", "FORMALIZE", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

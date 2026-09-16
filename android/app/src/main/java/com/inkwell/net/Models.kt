@@ -39,6 +39,12 @@ data class JobCreateRequest(
     val export: JsonObject? = null,
     val instruction: String? = null,
     val selection: List<Double>? = null,
+    /**
+     * Stage 12 (device-api additive): optional device metadata. `canvas.formalize` sends
+     * `{ "title": <source canvas title> }` so the server names the redraw
+     * "<title> — formalized". Null → omitted from the body (explicitNulls=false).
+     */
+    val meta: JsonObject? = null,
 )
 
 @Serializable

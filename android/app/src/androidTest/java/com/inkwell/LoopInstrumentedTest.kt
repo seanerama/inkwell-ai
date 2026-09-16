@@ -9,6 +9,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.inkwell.contracts.CardKind
 import com.inkwell.contracts.Highlight
 import com.inkwell.contracts.Text
+import com.inkwell.data.CanvasEntity
+import com.inkwell.data.CanvasRepository
 import com.inkwell.data.InkDatabase
 import com.inkwell.data.LayerEntity
 import com.inkwell.data.LayerRepository
@@ -102,6 +104,29 @@ class LoopInstrumentedTest {
             ""
         }
         return """{"id":"$askJobId","space_id":"space-1","canvas_id":"canvas-1","direction":"to_agent","type":"canvas.ask","status":"$status","request":{}$result,"created_at":"2026-09-15T00:00:00Z","updated_at":"2026-09-15T00:00:01Z"}"""
+    }
+
+    // --- Stage 12: canvas.formalize fixture (redraw → new agent-origin canvas) ---
+    private val fmzJobId = "job-formalize-1"
+    private val fmzNewCanvasId = "srv-formalized-1"
+    private val fmzSummary = "Redrew the topology as three aligned boxes."
+
+    private fun formalizeJobJson(status: String, withResult: Boolean): String {
+        val result = if (withResult) {
+            val pts = midPoints.joinToString(",") { "[${it[0]},${it[1]}]" }
+            ""","result":{"summary":"$fmzSummary",""" +
+                """"annotations":[{"id":"h1","type":"highlight","points":[$pts]}],""" +
+                """"cards":[{"kind":"answer","title":"Cleaned up","body":"Aligned the nodes."}],""" +
+                """"brain_writes":[],"contract_version":"agent-output/v1",""" +
+                """"canvas":{"id":"$fmzNewCanvasId","space_id":"space-1","title":"Topology — formalized",""" +
+                """"width_cu":1600,"height_cu":1200,"origin":"agent","created_at":"2026-09-16T00:00:00Z"},""" +
+                """"source_canvas_id":"canvas-1"}"""
+        } else {
+            ""
+        }
+        return """{"id":"$fmzJobId","space_id":"space-1","canvas_id":"canvas-1","direction":"to_agent",""" +
+            """"type":"canvas.formalize","status":"$status","request":{}$result,""" +
+            """"created_at":"2026-09-16T00:00:00Z","updated_at":"2026-09-16T00:00:01Z"}"""
     }
 
     @Before
@@ -277,6 +302,71 @@ class LoopInstrumentedTest {
         assertTrue(bmp.getPixel(10, 10) == Color.WHITE)
         assertTrue(bmp.getPixel(widthCu / 2, heightCu - 10) == Color.WHITE)
         bmp.recycle()
+    }
+
+    @Test
+    fun formalize_replay_creates_a_new_agent_origin_canvas_beside_the_source_drawn_opaque() = runBlocking {
+        val canvasRepository = CanvasRepository(
+            spaceDao = db.spaceDao(), canvasDao = db.canvasDao(),
+            layerDao = db.layerDao(), strokeDao = db.strokeDao(),
+        )
+        // Seed the source canvas in a folder (the redraw must land in the same folder).
+        db.canvasDao().upsert(
+            CanvasEntity(
+                id = "canvas-1", spaceId = "space-1", title = "Topology", widthCu = 1600, heightCu = 1200,
+                createdAt = 0L, updatedAt = 0L, origin = "user", folderId = "folder-A",
+            ),
+        )
+
+        // Call order: sync(null) → createJob → sync(cursor).
+        server.enqueue(syncEmpty("c0"))
+        server.enqueue(MockResponse().setResponseCode(202).setBody(formalizeJobJson("queued", withResult = false)))
+        server.enqueue(
+            MockResponse().setResponseCode(200)
+                .setBody("""{"jobs":[${formalizeJobJson("done", withResult = true)}],"cursor":"c1"}"""),
+        )
+
+        val request = JobRequestBuilder.build(
+            type = "canvas.formalize",
+            spaceId = "space-1",
+            canvasId = "canvas-1",
+            pngBytes = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47),
+            export = CoordinateMapping.export(),
+            title = "Topology",
+        )
+        val controller = LoopController(deviceRepository, JobResultHandler(layerRepository, canvasRepository))
+        val outcome = controller.run(request, canvasId = "canvas-1")
+
+        // The redraw opens a NEW agent-origin canvas beside the source (same folder).
+        assertFalse(outcome.isError)
+        assertEquals(fmzNewCanvasId, outcome.openCanvasId)
+        val newCanvas = db.canvasDao().byId(fmzNewCanvasId)!!
+        assertEquals("agent", newCanvas.origin)
+        assertEquals("folder-A", newCanvas.folderId)
+        assertEquals("Topology — formalized", newCanvas.title)
+
+        // Both canvases live in the same folder; the source is untouched (still user).
+        val inFolder = db.canvasDao().inFolder("space-1", "folder-A").map { it.id }.toSet()
+        assertTrue(inFolder.containsAll(setOf("canvas-1", fmzNewCanvasId)))
+        assertEquals("user", db.canvasDao().byId("canvas-1")!!.origin)
+
+        // The new canvas has exactly one agent/annotation layer and NO ink layer.
+        val layers = db.layerDao().forCanvas(fmzNewCanvasId)
+        assertEquals(1, layers.size)
+        assertEquals("agent", layers.single().owner)
+        assertTrue("no ink layer until first draw", layers.none { it.type == "ink" })
+
+        // The diagram draws OPAQUE on the agent-origin canvas.
+        val highlights = outcome.annotations.filterIsInstance<Highlight>()
+        assertEquals(1, highlights.size)
+        val widthCu = CoordinateMapping.DEFAULT_WIDTH_CU
+        val heightCu = CoordinateMapping.DEFAULT_HEIGHT_CU
+        val bmp = Bitmap.createBitmap(widthCu, heightCu, Bitmap.Config.ARGB_8888) // transparent
+        AnnotationRenderer(AnnotationRenderer.DEFAULT_ACCENT, widthCu, heightCu, agentOriginCanvas = true)
+            .draw(Canvas(bmp), CanvasTransform(scale = 1f, tx = 0f, ty = 0f), highlights)
+        val centerPixel = bmp.getPixel((0.5 * widthCu).roundToInt(), (0.5 * heightCu).roundToInt())
+        bmp.recycle()
+        assertEquals("agent-origin diagram is opaque", 255, Color.alpha(centerPixel))
     }
 
     private companion object {

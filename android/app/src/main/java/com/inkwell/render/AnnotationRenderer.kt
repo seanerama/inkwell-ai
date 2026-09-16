@@ -58,7 +58,18 @@ class AnnotationRenderer(
      * call sites (and the pure geometry) need not know about the flag.
      */
     private val fullVocabulary: Boolean = BuildConfig.FULL_VOCABULARY,
+    /**
+     * Stage 12 (SPEC §6.3): render mode for an **agent-origin** canvas (a Formalize
+     * redraw). When true the agent layer IS the content, not markup, so it is drawn
+     * **opaque** (alpha 255) and in **ink black** rather than at 70% in the space accent
+     * — there is no user ink to distinguish it from. The 70%/accent behaviour (this flag
+     * OFF, the default) stays for agent layers on user canvases.
+     */
+    private val agentOriginCanvas: Boolean = false,
 ) {
+
+    /** Mark opacity: opaque on an agent-origin canvas, else the 70% agent alpha (§6.3). */
+    private val fillAlpha: Int = if (agentOriginCanvas) OPAQUE_ALPHA else FILL_ALPHA
 
     /**
      * Number of annotations drawn as the labelled fallback box during the last [draw].
@@ -177,7 +188,7 @@ class AnnotationRenderer(
         // Fill-only at 70% opacity — a highlighter. No pressure variation; the bbox is
         // exactly points × canvas size (SPEC §6.3, contract `coordinate-mapping`).
         fillPaint.color = color
-        fillPaint.alpha = FILL_ALPHA
+        fillPaint.alpha = fillAlpha
         canvas.drawPath(path, fillPaint)
     }
 
@@ -192,7 +203,7 @@ class AnnotationRenderer(
         if (text.text.isEmpty()) return
         val placement = AnnotationGeometry.textPlacement(text, widthCu, heightCu)
         textPaint.color = colorOf(text.color)
-        textPaint.alpha = FILL_ALPHA
+        textPaint.alpha = fillAlpha
         textPaint.textSize = placement.sizeCu.toFloat()
         val maxWidth = AnnotationGeometry.textWrapWidthCu(widthCu)
         val lines = AnnotationGeometry.wrapWords(text.text, maxWidth) {
@@ -220,7 +231,7 @@ class AnnotationRenderer(
             if (i == 0) path.moveTo(x.toFloat(), y.toFloat()) else path.lineTo(x.toFloat(), y.toFloat())
         }
         linePaint.color = color
-        linePaint.alpha = FILL_ALPHA
+        linePaint.alpha = fillAlpha
         linePaint.pathEffect = if (dashed) strikeDashEffect else null
         canvas.drawPath(path, linePaint)
         linePaint.pathEffect = null
@@ -240,7 +251,7 @@ class AnnotationRenderer(
         val toY = CoordinateMapping.nmToCuY(arrow.to[1], heightCu).toFloat()
 
         linePaint.color = color
-        linePaint.alpha = FILL_ALPHA
+        linePaint.alpha = fillAlpha
         linePaint.pathEffect = null
         canvas.drawLine(fromX, fromY, toX, toY, linePaint)
 
@@ -252,7 +263,7 @@ class AnnotationRenderer(
             close()
         }
         fillPaint.color = color
-        fillPaint.alpha = FILL_ALPHA
+        fillPaint.alpha = fillAlpha
         canvas.drawPath(tri, fillPaint)
 
         val label = arrow.label?.takeIf { it.isNotBlank() }
@@ -271,7 +282,7 @@ class AnnotationRenderer(
         val rx = ellipse.rx * widthCu
         val ry = ellipse.ry * heightCu
         linePaint.color = colorOf(ellipse.color)
-        linePaint.alpha = FILL_ALPHA
+        linePaint.alpha = fillAlpha
         linePaint.pathEffect = null
         canvas.drawOval(
             RectF((cx - rx).toFloat(), (cy - ry).toFloat(), (cx + rx).toFloat(), (cy + ry).toFloat()),
@@ -287,7 +298,7 @@ class AnnotationRenderer(
         val right = ((rect.x + rect.w) * widthCu).toFloat()
         val bottom = ((rect.y + rect.h) * heightCu).toFloat()
         linePaint.color = color
-        linePaint.alpha = FILL_ALPHA
+        linePaint.alpha = fillAlpha
         linePaint.pathEffect = null
         canvas.drawRect(left, top, right, bottom, linePaint)
 
@@ -315,7 +326,7 @@ class AnnotationRenderer(
         }
         if (ann.closed) path.close()
         linePaint.color = colorOf(ann.color)
-        linePaint.alpha = FILL_ALPHA
+        linePaint.alpha = fillAlpha
         linePaint.pathEffect = null
         canvas.drawPath(path, linePaint)
     }
@@ -361,11 +372,11 @@ class AnnotationRenderer(
             // Leader line from the page edge to the note's text, at the first line's middle.
             val leaderY = top + lineSpacing / 2f
             leaderPaint.color = color
-            leaderPaint.alpha = FILL_ALPHA
+            leaderPaint.alpha = fillAlpha
             canvas.drawLine(pageRight, leaderY, textLeft, leaderY, leaderPaint)
 
             marginTextPaint.color = color
-            marginTextPaint.alpha = FILL_ALPHA
+            marginTextPaint.alpha = fillAlpha
             var baseline = top - fm.ascent
             for (line in wrapped[i]) {
                 canvas.drawText(line, textLeft, baseline, marginTextPaint)
@@ -380,10 +391,10 @@ class AnnotationRenderer(
         labelHaloPaint.textSize = LABEL_SIZE_CU
         val x = if (centered) xCu - labelPaint.measureText(label) / 2f else xCu
         labelHaloPaint.color = Color.WHITE
-        labelHaloPaint.alpha = FILL_ALPHA
+        labelHaloPaint.alpha = fillAlpha
         canvas.drawText(label, x, yCu, labelHaloPaint)
         labelPaint.color = color
-        labelPaint.alpha = FILL_ALPHA
+        labelPaint.alpha = fillAlpha
         canvas.drawText(label, x, yCu, labelPaint)
     }
 
@@ -413,12 +424,12 @@ class AnnotationRenderer(
         }
         val color = colorOf(annotation.color)
         fallbackPaint.color = color
-        fallbackPaint.alpha = FILL_ALPHA
+        fallbackPaint.alpha = fillAlpha
         canvas.drawRect(left, top, right, bottom, fallbackPaint)
 
         // Label above the box (inside it when the box touches the top edge).
         textPaint.color = color
-        textPaint.alpha = FILL_ALPHA
+        textPaint.alpha = fillAlpha
         textPaint.textSize = FALLBACK_LABEL_SIZE_CU
         val fm = textPaint.fontMetrics
         val labelBaseline = if (top - FALLBACK_LABEL_SIZE_CU >= 0f) {
@@ -432,13 +443,18 @@ class AnnotationRenderer(
         canvas.drawText(AnnotationGeometry.fallbackLabel(annotation), labelX, labelBaseline, textPaint)
     }
 
-    /** Annotation `color` (`#RRGGBB`) if set and parseable, else the space accent. */
+    /**
+     * Annotation `color` (`#RRGGBB`) if set and parseable, else the default mark color:
+     * **ink black** on an agent-origin canvas (the redraw is content, not markup) or the
+     * space accent on a user canvas (SPEC §6.3).
+     */
     private fun colorOf(hex: String?): Int {
-        if (hex == null) return accentColor
+        val default = if (agentOriginCanvas) INK_BLACK else accentColor
+        if (hex == null) return default
         return try {
             Color.parseColor(hex)
         } catch (_: IllegalArgumentException) {
-            accentColor
+            default
         }
     }
 
@@ -446,6 +462,12 @@ class AnnotationRenderer(
         /** 70% opacity (SPEC §6.3). */
         const val OPACITY = 0.70f
         val FILL_ALPHA = (255 * OPACITY).toInt() // 178
+
+        /** Fully opaque (Stage 12): the alpha used on an agent-origin canvas. */
+        const val OPAQUE_ALPHA = 255
+
+        /** Ink black — the default mark color on an agent-origin canvas (SPEC §6.3). */
+        const val INK_BLACK = 0xFF111111.toInt()
         /** Constant agent stroke width in canvas units (no pressure variation). */
         const val STROKE_WIDTH_CU = 6f
         /** Arrow-head length in CU (≈ 3 × [STROKE_WIDTH_CU]); scales with zoom under the transform. */

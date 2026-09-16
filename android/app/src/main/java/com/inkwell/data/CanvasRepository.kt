@@ -21,7 +21,36 @@ data class CanvasState(
     // lives in (null = space root), so Back returns to the folder it was opened from.
     val title: String = "",
     val folderId: String? = null,
+    // Stage 12: the canvas origin ("user"|"agent"). An agent-origin canvas (a Formalize
+    // redraw) renders its agent layer opaque/ink-black rather than 70%/accent (SPEC §6.3).
+    val origin: String = "user",
 )
+
+/**
+ * Stage 12 (Formalize): the seam [com.inkwell.net.JobResultHandler] uses to materialise
+ * an agent redraw as a local canvas, kept as an interface so the handler stays JVM
+ * unit-testable with a tiny fake (no Room). [com.inkwell.data.CanvasRepository]
+ * implements it against Room.
+ */
+interface FormalizedCanvasStore {
+    /**
+     * Create a LOCAL canvas for a `canvas.formalize` redraw using the SERVER's [canvasId]
+     * (so device and server agree on identity), `origin="agent"`, in the SAME folder as
+     * [sourceCanvasId] (null → space root), with exactly ONE `agent`/`annotation` layer
+     * linked to [jobId] and NO user/ink layer (SPEC §4.3). Idempotent by (canvas, job):
+     * re-applying the same finished job returns the existing agent layer. Returns the
+     * created (or existing) agent layer.
+     */
+    suspend fun createFormalizedCanvas(
+        canvasId: String,
+        spaceId: String,
+        title: String,
+        widthCu: Int,
+        heightCu: Int,
+        sourceCanvasId: String?,
+        jobId: String,
+    ): LayerEntity
+}
 
 /**
  * Device-local persistence for ink (contract `ink-storage`, Room v1 from Stage 2).
@@ -38,7 +67,7 @@ class CanvasRepository(
     private val strokeDao: StrokeDao,
     private val idGen: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = { System.currentTimeMillis() },
-) {
+) : FormalizedCanvasStore {
 
     /** Ensure the default space/canvas/ink-layer exist, then load the canvas + strokes. */
     suspend fun openDefaultCanvas(): CanvasState {
@@ -55,6 +84,7 @@ class CanvasRepository(
             strokes = strokes,
             title = canvas.title,
             folderId = canvas.folderId,
+            origin = canvas.origin,
         )
     }
 
@@ -76,7 +106,56 @@ class CanvasRepository(
             strokes = strokes,
             title = canvas.title,
             folderId = canvas.folderId,
+            origin = canvas.origin,
         )
+    }
+
+    /**
+     * Stage 12 (Formalize): materialise an agent redraw as a local canvas — see
+     * [FormalizedCanvasStore.createFormalizedCanvas]. Uses the server's [canvasId], sets
+     * `origin="agent"`, inherits the source canvas's folder, and creates exactly one
+     * `agent`/`annotation` layer (no ink layer). Idempotent by (canvas, job).
+     */
+    override suspend fun createFormalizedCanvas(
+        canvasId: String,
+        spaceId: String,
+        title: String,
+        widthCu: Int,
+        heightCu: Int,
+        sourceCanvasId: String?,
+        jobId: String,
+    ): LayerEntity {
+        val now = clock()
+        val folderId = sourceCanvasId?.let { canvasDao.byId(it)?.folderId }
+        canvasDao.upsert(
+            CanvasEntity(
+                id = canvasId,
+                spaceId = spaceId,
+                title = title,
+                widthCu = widthCu,
+                heightCu = heightCu,
+                createdAt = now,
+                updatedAt = now,
+                origin = "agent",
+                folderId = folderId,
+            ),
+        )
+        // Idempotent: reuse an existing agent layer for this job rather than duplicating.
+        val existing = layerDao.forCanvas(canvasId)
+        existing.firstOrNull { it.owner == "agent" && it.jobId == jobId }?.let { return it }
+        val layer = LayerEntity(
+            id = idGen(),
+            canvasId = canvasId,
+            z = (existing.maxOfOrNull { it.z } ?: -1) + 1,
+            owner = "agent",
+            type = "annotation",
+            visible = true,
+            opacity = 1.0f,
+            jobId = jobId,
+            createdAt = now,
+        )
+        layerDao.upsert(layer)
+        return layer
     }
 
     /** Rename a canvas (Stage 11 title edit); bumps `updated_at` via the injected clock. */

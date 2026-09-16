@@ -130,3 +130,37 @@ the card's `actions`. Effect by the action's `kind`: `confirm` sets the card `do
 A successful card-state change (either route) **bumps the parent job's `updated_at`**,
 so the job re-appears through `/sync` (which orders by `updated_at`) and the device sees
 the new card state.
+
+### Stage 12 additions — 2026-09-16
+
+Stage 12 (`canvas.formalize`) extends v1 additively: one new optional request field and
+one new route. Nothing frozen above changes.
+
+**Optional `meta: { title }` on `POST /jobs`.** The device may send a `meta` object on a
+job create; it is carried onto the stored job `request` untouched. `canvas.formalize`
+reads `meta.title` (the source canvas's title) to name the redraw
+`"<title> — formalized"`; absent it, the redraw is titled `"Formalized"`. Older servers
+ignore an unknown `meta`; the field is optional for every job type.
+
+**`GET /canvases?space_id=&since=`** → `CanvasOut[]`. Lists the **server-known**
+canvases — i.e. the agent-origin canvases the server creates itself (currently the
+`canvas.formalize` redraws); user canvases live on the device and are not listed. Bearer
+auth (`require_token`). Optional `space_id` (UUID) filters to one space; optional `since`
+(RFC3339) filters to `created_at >= since` (a trailing `Z` is accepted, else `422
+validation`). Ordered by `created_at` descending. Each `CanvasOut` is:
+
+```json
+{
+  "id": "uuid",
+  "space_id": "uuid",
+  "title": "string",
+  "width_cu": 2480,
+  "height_cu": 3508,
+  "origin": "user|agent",
+  "created_at": "timestamp"
+}
+```
+
+This gives Phase 4's canvas push a base to build on; the `canvas.formalize` redraw itself
+rides back on the polled job (see the `result.canvas` sibling key in `agent-output`), not
+through this route.

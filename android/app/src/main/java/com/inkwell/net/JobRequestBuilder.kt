@@ -31,9 +31,14 @@ object JobRequestBuilder {
     /** Base64-encode PNG bytes for the `image` field (no line wrapping). */
     fun encodeImage(pngBytes: ByteArray): String = Base64.getEncoder().encodeToString(pngBytes)
 
+    /** The `meta` sub-object carrying the source canvas [title] (Stage 12, `canvas.formalize`). */
+    fun metaJson(title: String): JsonObject = JsonObject(mapOf("title" to JsonPrimitive(title)))
+
     /**
      * Build a `to_agent` job request (e.g. `type = "canvas.annotate"`). [selection] is
-     * an optional normalized `[x,y,w,h]`; pass null to omit it.
+     * an optional normalized `[x,y,w,h]`; pass null to omit it. [title] is an optional
+     * source-canvas title (Stage 12): non-null/non-blank → sent as `meta.title` so a
+     * `canvas.formalize` redraw is named "<title> — formalized"; null/blank omits `meta`.
      */
     fun build(
         type: String,
@@ -43,6 +48,7 @@ object JobRequestBuilder {
         export: CoordinateMapping.Export,
         instruction: String? = null,
         selection: List<Double>? = null,
+        title: String? = null,
     ): JobCreateRequest = JobCreateRequest(
         type = type,
         spaceId = spaceId,
@@ -51,5 +57,6 @@ object JobRequestBuilder {
         export = exportJson(export),
         instruction = instruction,
         selection = selection,
+        meta = title?.takeIf { it.isNotBlank() }?.let { metaJson(it) },
     )
 }
