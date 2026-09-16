@@ -20,6 +20,7 @@ from dataclasses import dataclass
 
 from pydantic import ValidationError
 
+from app.agent.api_schema import for_structured_output
 from app.agent.client import AgentCall, create_message, image_block, text_block
 from app.agent.prompt import build_instruction, build_system_prompt
 from app.contracts.check import frozen_schema
@@ -77,7 +78,9 @@ def run_agent(
     job_id: str,
 ) -> AgentRun:
     """Run the agent for one job, with two-tier validation and one retry."""
-    schema = frozen_schema()
+    # The frozen contract is the schema of record; the API gets its supported projection
+    # (unsupported constraints are re-checked by Pydantic after the call).
+    schema = for_structured_output(frozen_schema())
     system = build_system_prompt(system_prompt, brain_context, job_type=job_type)
     messages: list[dict] = [
         {

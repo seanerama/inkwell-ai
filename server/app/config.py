@@ -42,6 +42,15 @@ class Settings(BaseSettings):
 
     # SPEC §10.5 cost control: per-space daily job cap, enforced at claim time.
     agent_daily_cap: int = 200
+    # ADR-0006 amendment (2026-09-16): structured outputs are OFF by default. The API
+    # rejected the frozen schema three ways (minItems arity, additionalProperties,
+    # "schema is too complex"); prompt-guided JSON + two-tier validation + one retry is
+    # the default. ON sends the projected schema (app.agent.api_schema) as
+    # output_config.format for when the API limits change.
+    agent_structured_output: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AGENT_STRUCTURED_OUTPUT", "INKWELL_AGENT_STRUCTURED_OUTPUT"),
+    )
 
     # ADR-0006: non-streaming output cap for the agent call.
     agent_max_tokens: int = 16000

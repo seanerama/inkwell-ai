@@ -3,8 +3,9 @@
 SDK usage here was written against the ``claude-api`` skill's Python reference (anthropic
 SDK, structured outputs), not from memory:
 
-- Structured outputs use ``output_config={"format": {"type": "json_schema", "schema":
-  <frozen agent-output schema>}, "effort": <per job type>}`` on
+- Prompt-guided JSON by default (ADR-0006 amendment 2026-09-16); with
+  ``AGENT_STRUCTURED_OUTPUT`` on, ``output_config={"format": {"type": "json_schema",
+  "schema": <projected agent-output schema>}, "effort": <per job type>}`` on
   ``client.messages.create(...)``. With a format set, the first ``text`` content block
   is guaranteed to be valid JSON for the schema.
 - Adaptive thinking is left at the API default (Sonnet 5 runs adaptive without a
@@ -101,15 +102,17 @@ def create_message(
     """Make one structured-output Messages API call and return text + token usage."""
     settings = get_settings()
     client = client or get_client()
+    # ADR-0006 amendment: prompt-guided JSON by default; the schema projection is sent
+    # as output_config.format only when AGENT_STRUCTURED_OUTPUT is on.
+    output_config: dict[str, Any] = {"effort": effort_for(job_type)}
+    if settings.agent_structured_output:
+        output_config["format"] = {"type": "json_schema", "schema": schema}
     response = client.messages.create(
         model=model or DEFAULT_MODEL,
         max_tokens=settings.agent_max_tokens,
         system=system,
         messages=messages,
-        output_config={
-            "format": {"type": "json_schema", "schema": schema},
-            "effort": effort_for(job_type),
-        },
+        output_config=output_config,
     )
     usage = getattr(response, "usage", None)
     return AgentCall(

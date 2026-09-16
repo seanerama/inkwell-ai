@@ -52,3 +52,42 @@ approach is both weaker and partly obsolete.
 - Exact SDK calls are taken from the SDK documentation at build time, not recalled;
   the builder loads the `claude-api` skill and reads the Python README before writing
   `agent.py`.
+
+## Amendment 2026-09-16 — structured outputs off by default
+
+**Status of this section:** Accepted (supersedes the "structured outputs" bullet of the
+Decision above; everything else stands).
+
+The first real call from staging (stage 7, `canvas.ask`) failed with `400` from the
+Messages API, and two follow-up probes with progressively simplified projections of
+the frozen schema failed too:
+
+1. `For 'array' type, 'minItems' values other than 0 and 1 are not supported` — the
+   contract's fixed-arity `Point`/`Rect` arrays.
+2. `For 'object' type, 'additionalProperties' must be explicitly set to false` — the
+   contract's open `CardAction.payload`.
+3. `Schema is too complex` — even with the nine-way annotation `anyOf` flattened to
+   one closed object and all prose stripped (2.4 KB).
+
+The constrained decoder cannot express the v1 contract. Editing the frozen contract
+to fit the decoder would invert the dependency (ADR-0007: the contract is the source
+of truth, consumers adapt).
+
+**Decision.** Prompt-guided JSON is the default, exactly as SPEC §10.4 first
+described: the system prompt describes the schema, the model returns one JSON object,
+`extract_json` strips fences, Pydantic (proven equal to the frozen schema by the
+contract check) and the semantic validator enforce the contract, one retry appends the
+error, then `failed` + error card. `output_config.effort` is still set per job type.
+The projection in `app/agent/api_schema.py` stays behind
+`AGENT_STRUCTURED_OUTPUT=true` for when the API's limits change; its tests document
+the three failures.
+
+**Evidence.** Prompt-only against the owner's real "what is 1+9=?" export: valid JSON
+first try, a `text` annotation "= 10" at `[0.6, 0.36]` and an `answer` card, 3,038
+input / 150 output tokens.
+
+**Consequences.** Schema validity is no longer guaranteed at generation time; the
+retry path is now the safety net and its metrics (`agent.retry`, `agent.failed` log
+events) should be watched during the Phase 2 vocabulary work. Stage 5's fake-client
+tests never exercised the real API, which is how this shipped; the Tester role owns
+adding a live-API gate before Phase 2.
