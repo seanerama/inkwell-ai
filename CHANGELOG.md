@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.12
+
+### Other
+- Stage 12: Formalize — redraw a sketch as a clean diagram on a new canvas (#30)
+- Stage 11: Library — many canvases, folders, titles; open, create, move, delete (#29)
+- Plan v0.3: stage 11 (library: folders, many canvases) and stage 12 (formalize)
+- smoke: diagram result on v0.0.11 (owner pass, formalize gap noted)
+- Release v0.0.11: STATUS staging (Phase 2 shipped, clean lanes)
+
 ## 0.0.11
 
 ### Other

@@ -1,13 +1,13 @@
 {
-  "version": "0.0.11",
+  "version": "0.0.12",
   "deployed_at": "2026-09-16T19:29:06Z",
-  "rollback_from": "ghcr.io/seanerama/inkwell-ai-server@sha256:5ac6373043492dd8f6eb71ae4b2c63c67127aa394143f6799da0a51a67edbf49 (v0.0.10)",
+  "rollback_from": "ghcr.io/seanerama/inkwell-ai-server@sha256:60747bf2a40cda2b17b38f828271efeb22f1b9042564093bd9ed72ad90f284f4 (v0.0.11)",
   "environments": {
     "staging": {
-      "status": "deployed v0.0.11 by digest (Phase 2 complete: canary, full vocabulary, cards); all three release lanes green; deploy canary passed live; smoke gate passed",
+      "status": "deployed v0.0.12 by digest (v0.3: Library + Formalize); all three release lanes green; deploy canary passed live; smoke gate passed 3/3",
       "url": "https://mini-hp01.taile0ffc4.ts.net:8444",
-      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:60747bf2a40cda2b17b38f828271efeb22f1b9042564093bd9ed72ad90f284f4",
-      "deployed_at": "2026-09-16T19:29:06Z"
+      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:373263b3fd1b393059760d3ae7aae5a2e2bf233c1061cf26aea85009965a83d1",
+      "deployed_at": "2026-09-16T22:48:42Z"
     },
     "prod": {
       "status": "not deployed"
@@ -20,6 +20,7 @@
   "notes": [
     "2026-09-15: walking skeleton verified on the physical tablet against staging v0.0.4 (pair, Check, Ping round-trip). Pending on operator: rotate ANTHROPIC_API_KEY (exposed in a session log), sudo systemctl enable inkwell-staging. Prod not yet promoted (confirm gate).",
     "2026-09-16: Tailscale SSH check mode expires roughly daily; the operator must re-approve the login link before deploy.sh can run.",
-    "2026-09-16: first successful real agent job on staging (canvas.ask replay of the owner's 'what is 1+9=?' export): 3038 in / 161 out tokens."
+    "2026-09-16: first successful real agent job on staging (canvas.ask replay of the owner's 'what is 1+9=?' export): 3038 in / 161 out tokens.",
+    "v0.0.12 (stages 11 Library + 12 Formalize) deployed to staging 2026-09-16 by digest; health 0.0.12, canary canvas.ask done (1 annotation, 1 card), Playwright smoke 3/3 incl. new GET /canvases bearer gate (200 [] with tablet token). Prod NOT promoted (confirm gate). On-device smokes pending: smoke/library.md, smoke/formalize.md on the v0.0.12 APK. No new server env vars; client flags LIBRARY and FORMALIZE ON in release by documented exception."
   ]
 }

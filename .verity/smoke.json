@@ -4,16 +4,37 @@
     {
       "name": "server health answers with the frozen device-api contract",
       "steps": [
-        { "goto": "/v1/health" },
-        { "expectText": "\"status\":\"ok\"" },
-        { "expectText": "device-api/v1" }
+        {
+          "goto": "/v1/health"
+        },
+        {
+          "expectText": "\"status\":\"ok\""
+        },
+        {
+          "expectText": "device-api/v1"
+        }
       ]
     },
     {
       "name": "unauthenticated API access is refused (bearer auth is live)",
       "steps": [
-        { "goto": "/v1/spaces" },
-        { "expectText": "unauthorized" }
+        {
+          "goto": "/v1/spaces"
+        },
+        {
+          "expectText": "unauthorized"
+        }
+      ]
+    },
+    {
+      "name": "stage 12 canvases listing is bearer-gated (new additive route)",
+      "steps": [
+        {
+          "goto": "/v1/canvases"
+        },
+        {
+          "expectText": "unauthorized"
+        }
       ]
     }
   ]
