@@ -30,8 +30,19 @@ for env in staging prod; do
 done
 
 echo ">> backup tooling (ADR-0011): zstd + age + rclone"
-sudo apt-get update -qq
-sudo apt-get install -y -qq zstd age rclone
+# The host may be Debian-family (apt), Arch-family (pacman, e.g. Omarchy) or Fedora (dnf).
+if command -v apt-get >/dev/null 2>&1; then
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq zstd age rclone
+elif command -v pacman >/dev/null 2>&1; then
+  sudo pacman -Sy --noconfirm --needed zstd age rclone
+elif command -v dnf >/dev/null 2>&1; then
+  sudo dnf install -y -q zstd age rclone
+else
+  echo "!! no supported package manager found; install zstd, age and rclone by hand, then re-run" >&2
+  exit 1
+fi
+for t in zstd age rclone; do command -v "$t" >/dev/null || { echo "!! $t still missing" >&2; exit 1; }; done
 
 echo ">> backup/restore scripts -> /srv/inkwell/bin (refreshed by deploy.sh thereafter)"
 sudo install -d -o "${OPERATOR}" -g "${OPERATOR}" -m 0755 /srv/inkwell/bin
