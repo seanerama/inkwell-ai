@@ -10,6 +10,7 @@ x-app-env: &app-env
   INKWELL_BLOB_DIR: /data/blobs
   INKWELL_ENV: ${INKWELL_ENV:-staging}
   AGENT_ENABLED: ${AGENT_ENABLED:-false}
+  SPACES_EDITABLE: ${SPACES_EDITABLE:-false}
   ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
 
 services:
