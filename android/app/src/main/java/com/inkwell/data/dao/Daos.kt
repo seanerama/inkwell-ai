@@ -22,6 +22,14 @@ interface SpaceDao {
 
     @Query("SELECT * FROM spaces WHERE id = :id")
     suspend fun byId(id: String): SpaceEntity?
+
+    /**
+     * Stage 14 (ADR-0010): delete a space row by id. Used only by [com.inkwell.data.SpaceSync]
+     * to drop a locally invented placeholder once its ink has been reassigned to the server
+     * twin (same slug) inside the reconciliation transaction. No schema change.
+     */
+    @Query("DELETE FROM spaces WHERE id = :id")
+    suspend fun delete(id: String)
 }
 
 @Dao
@@ -64,6 +72,30 @@ interface CanvasDao {
 
     @Query("UPDATE canvases SET folder_id = :folderId, updated_at = :updatedAt WHERE id = :id")
     suspend fun move(id: String, folderId: String?, updatedAt: Long)
+
+    // --- Stage 14 (ADR-0010): server-mirrored spaces, move between spaces, reconciliation ---
+
+    /**
+     * Move a canvas to another space's ROOT: set `space_id` and clear `folder_id` (a folder
+     * id is meaningless in the target tree), bumping `updated_at`. Cards/layers untouched.
+     */
+    @Query("UPDATE canvases SET space_id = :spaceId, folder_id = NULL, updated_at = :updatedAt WHERE id = :id")
+    suspend fun moveToSpace(id: String, spaceId: String, updatedAt: Long)
+
+    /**
+     * Set a canvas's `space_id` while KEEPING its `folder_id` — used when a whole folder
+     * subtree moves to another space (the tree structure is preserved). Bumps `updated_at`.
+     */
+    @Query("UPDATE canvases SET space_id = :spaceId, updated_at = :updatedAt WHERE id = :id")
+    suspend fun setSpace(id: String, spaceId: String, updatedAt: Long)
+
+    /**
+     * Reconciliation rewrite ([com.inkwell.data.SpaceSync]): repoint every canvas of a local
+     * placeholder space onto its server twin. `updated_at` is intentionally left alone — this
+     * is an identity rewrite, not a user edit.
+     */
+    @Query("UPDATE canvases SET space_id = :newSpaceId WHERE space_id = :oldSpaceId")
+    suspend fun reassignSpace(oldSpaceId: String, newSpaceId: String)
 
     @Query("UPDATE canvases SET deleted_at = :deletedAt WHERE id = :id")
     suspend fun setDeletedAt(id: String, deletedAt: Long?)
@@ -118,6 +150,29 @@ interface FolderDao {
 
     @Query("UPDATE folders SET parent_id = :parentId, updated_at = :updatedAt WHERE id = :id")
     suspend fun move(id: String, parentId: String?, updatedAt: Long)
+
+    // --- Stage 14 (ADR-0010): move between spaces + reconciliation ---
+
+    /**
+     * Move a folder to another space, reparenting it (used for the moved subtree root, where
+     * [parentId] is null = the target space root). Bumps `updated_at`.
+     */
+    @Query("UPDATE folders SET space_id = :spaceId, parent_id = :parentId, updated_at = :updatedAt WHERE id = :id")
+    suspend fun moveToSpace(id: String, spaceId: String, parentId: String?, updatedAt: Long)
+
+    /**
+     * Set a descendant folder's `space_id` while KEEPING its `parent_id` (subtree structure is
+     * preserved when a folder moves to another space). Bumps `updated_at`.
+     */
+    @Query("UPDATE folders SET space_id = :spaceId, updated_at = :updatedAt WHERE id = :id")
+    suspend fun setSpace(id: String, spaceId: String, updatedAt: Long)
+
+    /**
+     * Reconciliation rewrite ([com.inkwell.data.SpaceSync]): repoint every folder of a local
+     * placeholder space onto its server twin. `updated_at` is left alone (identity rewrite).
+     */
+    @Query("UPDATE folders SET space_id = :newSpaceId WHERE space_id = :oldSpaceId")
+    suspend fun reassignSpace(oldSpaceId: String, newSpaceId: String)
 
     @Query("UPDATE folders SET deleted_at = :deletedAt WHERE id = :id")
     suspend fun setDeletedAt(id: String, deletedAt: Long?)

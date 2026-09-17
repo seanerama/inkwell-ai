@@ -108,6 +108,16 @@ android {
             // release, because prod is not promoted, staging is the only environment. Flip
             // to "false" to hide the Formalize option and skip the redraw handling.
             buildConfigField("boolean", "FORMALIZE", "true")
+            // Spaces kill-switch (Stage 14 dark-launch flag, THIS stage's feature): ON adds
+            // the server-mirrored space tab bar above the Library, per-space folder tree +
+            // Trash, move-canvas/folder-to-another-space, posting every job with the canvas's
+            // own space_id, and agent marks in the space's accent colour (ADR-0010). OFF
+            // restores today's single seeded space: no tab bar, and Send resolves the space
+            // by the "work" slug. Documented exception (same rationale as
+            // ONE_TAP_ASK/FULL_VOCABULARY/CARD_ACTIONS/LIBRARY/FORMALIZE): default ON in debug
+            // AND release, because prod is not promoted, staging is the only environment. Flip
+            // to "false" to restore the single-space behaviour without a code change.
+            buildConfigField("boolean", "SPACES", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -141,6 +151,10 @@ android {
             // block and the stage-12 spec). Flip to "false" to hide the Formalize picker
             // option and skip the redraw-to-new-canvas handling without a code change.
             buildConfigField("boolean", "FORMALIZE", "true")
+            // Stage 14 Spaces: ON in release by documented exception (see the debug block and
+            // the stage-14 spec). Flip to "false" to restore the single seeded space (no tab
+            // bar, "work"-slug send) without a code change.
+            buildConfigField("boolean", "SPACES", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

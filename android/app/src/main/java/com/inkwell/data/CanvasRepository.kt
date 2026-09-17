@@ -24,6 +24,9 @@ data class CanvasState(
     // Stage 12: the canvas origin ("user"|"agent"). An agent-origin canvas (a Formalize
     // redraw) renders its agent layer opaque/ink-black rather than 70%/accent (SPEC §6.3).
     val origin: String = "user",
+    // Stage 14: the accent colour of the canvas's space (#RRGGBB), for agent marks (SPEC §6.3).
+    // Null when the space row is missing → the renderer falls back to DEFAULT_ACCENT.
+    val spaceColor: String? = null,
 )
 
 /**
@@ -85,6 +88,7 @@ class CanvasRepository(
             title = canvas.title,
             folderId = canvas.folderId,
             origin = canvas.origin,
+            spaceColor = spaceDao.byId(space.id)?.color,
         )
     }
 
@@ -107,6 +111,7 @@ class CanvasRepository(
             title = canvas.title,
             folderId = canvas.folderId,
             origin = canvas.origin,
+            spaceColor = spaceDao.byId(canvas.spaceId)?.color,
         )
     }
 
@@ -192,6 +197,12 @@ class CanvasRepository(
      * seeded space rather than each creating its own.
      */
     suspend fun ensureSeededSpaceId(): String = ensureDefaultSpace().id
+
+    /** Stage 14: all spaces ordered by position (the tab bar's source). */
+    suspend fun allSpaces(): List<SpaceEntity> = spaceDao.all()
+
+    /** Stage 14: the current `space_id` of a canvas (reflects any reconciliation). */
+    suspend fun spaceIdForCanvas(canvasId: String): String? = canvasDao.byId(canvasId)?.spaceId
 
     private suspend fun ensureDefaultSpace(): SpaceEntity {
         spaceDao.all().firstOrNull()?.let { return it }

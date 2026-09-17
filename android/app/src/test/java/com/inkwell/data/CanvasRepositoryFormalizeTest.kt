@@ -24,6 +24,7 @@ class CanvasRepositoryFormalizeTest {
         override suspend fun upsert(space: SpaceEntity) { store.removeAll { it.id == space.id }; store.add(space) }
         override suspend fun all() = store.sortedBy { it.position }
         override suspend fun byId(id: String) = store.firstOrNull { it.id == id }
+        override suspend fun delete(id: String) { store.removeAll { it.id == id } }
     }
 
     private class FakeCanvasDao : CanvasDao {
@@ -36,6 +37,15 @@ class CanvasRepositoryFormalizeTest {
         override suspend fun allForSpace(spaceId: String) = store.filter { it.spaceId == spaceId }
         override suspend fun rename(id: String, title: String, updatedAt: Long) {}
         override suspend fun move(id: String, folderId: String?, updatedAt: Long) {}
+        override suspend fun moveToSpace(id: String, spaceId: String, updatedAt: Long) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(spaceId = spaceId, folderId = null, updatedAt = updatedAt)
+        }
+        override suspend fun setSpace(id: String, spaceId: String, updatedAt: Long) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(spaceId = spaceId, updatedAt = updatedAt)
+        }
+        override suspend fun reassignSpace(oldSpaceId: String, newSpaceId: String) {
+            store.indices.forEach { i -> if (store[i].spaceId == oldSpaceId) store[i] = store[i].copy(spaceId = newSpaceId) }
+        }
         override suspend fun setDeletedAt(id: String, deletedAt: Long?) {}
         override suspend fun trashCanvasesInFolder(spaceId: String, folderId: String, deletedAt: Long) {}
         override suspend fun purgeTrashedBefore(cutoff: Long) {}

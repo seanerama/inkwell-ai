@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
+import androidx.room.withTransaction
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.inkwell.BuildConfig
@@ -30,6 +31,7 @@ import com.inkwell.data.InkDatabase
 import com.inkwell.data.LayerRepository
 import com.inkwell.data.LibraryRepository
 import com.inkwell.data.RoomCardStateRepository
+import com.inkwell.data.SpaceSync
 import com.inkwell.data.ThumbnailRenderer
 import com.inkwell.net.AndroidConnectivity
 import com.inkwell.net.EncryptedTokenStore
@@ -63,6 +65,17 @@ class MainActivity : ComponentActivity() {
     }
     private val thumbnailRenderer by lazy { ThumbnailRenderer(applicationContext.filesDir) }
 
+    // Stage 14: mirrors the server's spaces + reconciles the local placeholder (ADR-0010).
+    // Reconciliation runs through Room's withTransaction so ink can never be stranded. The
+    // device repository is built fresh from the current pairing (null when unpaired).
+    private val spaceSync by lazy {
+        val tokenStore = EncryptedTokenStore(applicationContext)
+        SpaceSync.create(
+            db = db,
+            deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
+        )
+    }
+
     private val pairingViewModel: PairingViewModel by viewModels {
         val tokenStore = EncryptedTokenStore(applicationContext)
         viewModelFactory { initializer { PairingViewModel(tokenStore) } }
@@ -92,6 +105,8 @@ class MainActivity : ComponentActivity() {
                     saveJobType = { prefs.edit().putString("job_type", it).apply() },
                     // With the Library on, the canvas is opened per-tile via openCanvas().
                     autoOpenDefault = !BuildConfig.LIBRARY,
+                    // Stage 14: post with the canvas's own space id; reconcile on send.
+                    spaceSync = spaceSync,
                 )
             }
         }
@@ -102,9 +117,21 @@ class MainActivity : ComponentActivity() {
             folderDao = db.folderDao(),
             canvasDao = db.canvasDao(),
             layerDao = db.layerDao(),
+            // Stage 14: move-between-spaces runs atomically so a partial move never strands ink.
+            runInTransaction = { block -> db.withTransaction { block() } },
         )
+        // Stage 14: the active-space tab is remembered in the same plain prefs as the job type.
+        val prefs = applicationContext.getSharedPreferences("inkwell_prefs", Context.MODE_PRIVATE)
         viewModelFactory {
-            initializer { LibraryViewModel(library = library, canvasRepository = canvasRepository) }
+            initializer {
+                LibraryViewModel(
+                    library = library,
+                    canvasRepository = canvasRepository,
+                    spaceSync = spaceSync,
+                    loadActiveSpaceId = { prefs.getString("active_space_id", null) },
+                    saveActiveSpaceId = { prefs.edit().putString("active_space_id", it).apply() },
+                )
+            }
         }
     }
 
@@ -114,6 +141,11 @@ class MainActivity : ComponentActivity() {
         // Send feature is enabled (release stays dark until the follow-up PR flips it).
         if (BuildConfig.SEND_ENABLED) {
             SyncWorker.schedulePeriodic(applicationContext)
+        }
+        // Stage 14 trigger: prime the canvas ViewModel's server-space mirror on app start
+        // (no-op when unpaired/offline — the mirror is refreshed again at send time).
+        if (BuildConfig.SPACES) {
+            canvasViewModel.refreshSpaces()
         }
         setContent {
             MaterialTheme {
