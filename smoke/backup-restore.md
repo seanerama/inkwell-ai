@@ -81,14 +81,14 @@ docker compose -p inkwell-restore-<ts> -f <printed-workdir>/compose.yml down -v
 
 | Check | Result |
 | --- | --- |
-| `GET /v1/health` ok (live) | |
-| `backup.sh staging` exit 0, `latest` present, manifest written | |
-| No secret printed during backup | |
-| `restore.sh` scratch: `health=ok` | |
-| Restored `spaces` count == live `/v1/spaces` | |
-| Restored blob file count == live | |
-| Scratch stack torn down; live stack untouched | |
-| (if `BACKUP_REMOTE` set) `rclone check` passed once | |
+| `GET /v1/health` ok (live) | pass (0.0.14) |
+| `backup.sh staging` exit 0, `latest` present, manifest written | pass (pre-deploy set via remote-deploy; latest → 20260917T170918Z-pre-deploy; nightly timer not yet installed — sudo step pending) |
+| No secret printed during backup | pass (2026-09-17, v0.0.14 pre-deploy set 20260917T170918Z-pre-deploy) |
+| `restore.sh` scratch: `health=ok` | pass — but only with `--into inkwell-restore-drill`; the default project name is rejected by Compose (stage 19) |
+| Restored `spaces` count == live `/v1/spaces` | pass (5 = 5) |
+| Restored blob file count == live | pass (19 files; matches the archived volume) |
+| Scratch stack torn down; live stack untouched | pass (torn down by compose label; live health ok) |
+| (if `BACKUP_REMOTE` set) `rclone check` passed once | n/a — BACKUP_REMOTE unset (rclone not installed on host yet; host-setup sudo step pending) |
 
 ## Notes
 

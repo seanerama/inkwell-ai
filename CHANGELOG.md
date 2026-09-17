@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.14
+
+### Other
+- Stage 18: key-rotation runbook + dual-pepper grace window and rotation tooling (#41)
+- [stage 17] Backups: nightly pg_dump + blobs snapshot on the host, retention, off-host copy, tested restore (#40)
+- Plan v0.5 ops hygiene: stage 17 (backups + tested restore), stage 18 (key-rotation runbook, dual-pepper grace); ADR-0011
+- smoke: spaces + space-settings results on v0.0.13 (owner pass on tablet; Phase 3 acceptance met)
+- Release v0.0.13: STATUS staging (Phase 3 spaces shipped; instrumented lane red → bug stage 16)
+
 ## 0.0.13
 
 ### Other

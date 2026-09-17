@@ -64,6 +64,13 @@
 
 ## 3. `INKWELL_TOKEN_PEPPER` (with the dual-pepper grace window)
 
+> **DO NOT RUN until stage 20 (#43) is merged and deployed.** Exercised on staging
+> 2026-09-17 (v0.0.14): the grace window did not work because `deploy/compose.yml`
+> does not pass `INKWELL_TOKEN_PEPPER_PREVIOUS` to the containers, and
+> `migrate-check` exited 0 while the token was still on the old pepper. Rotating the
+> pepper on the current deployment invalidates every device token; the only rollback
+> is restoring `INKWELL_TOKEN_PEPPER` from `.env.bak-<ts>`.
+
 - **Impact:** **none** when the tablet syncs during the grace window — the token keeps
   working with no re-pairing. Without the grace window, rotating the pepper invalidates
   every device token (ADR-0008 original consequence). If a device never syncs during the
