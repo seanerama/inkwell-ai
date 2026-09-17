@@ -29,6 +29,38 @@ data class Space(
     @SerialName("created_at") val createdAt: String,
 )
 
+/**
+ * `POST /spaces` request body (Stage 15; contract device-api §Stage 13 additions, `SpaceCreate`).
+ * `name` is required (1–120); every other field is nullable with a null default so
+ * `explicitNulls=false` (ApiClient's Json) OMITS the unset keys and the server applies its own
+ * defaults (`model=claude-sonnet-5`, `color=#000000`, derived `slug`, `position=max+1`, …).
+ */
+@Serializable
+data class SpaceCreateRequest(
+    val name: String,
+    val color: String? = null,
+    val slug: String? = null,
+    @SerialName("system_prompt") val systemPrompt: String? = null,
+    val model: String? = null,
+    val tools: List<String>? = null,
+    val position: Int? = null,
+)
+
+/**
+ * `PATCH /spaces/{id}` request body (Stage 15; contract device-api §Stage 13 additions,
+ * `SpaceUpdate`). Every field is nullable with a null default so `explicitNulls=false` omits
+ * the unchanged ones — a true partial PATCH (`exclude_unset` on the server). `slug` is
+ * deliberately absent: it is immutable server-side (sending it → `422 "slug is immutable"`).
+ */
+@Serializable
+data class SpacePatchRequest(
+    val name: String? = null,
+    val color: String? = null,
+    @SerialName("system_prompt") val systemPrompt: String? = null,
+    val model: String? = null,
+    val position: Int? = null,
+)
+
 /** `POST /jobs` request body (contract device-api). For Stage 2 only `system.ping`. */
 @Serializable
 data class JobCreateRequest(

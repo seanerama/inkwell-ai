@@ -1,7 +1,9 @@
 package com.inkwell.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,17 +15,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.inkwell.BuildConfig
 import com.inkwell.data.SpaceEntity
 import com.inkwell.render.AnnotationRenderer
 
@@ -33,7 +42,13 @@ import com.inkwell.render.AnnotationRenderer
  * `name`, with a selected indicator painted in the space `color` (parsed via
  * [AnnotationRenderer.accentFrom]). A trailing refresh control re-mirrors the server's
  * spaces; a subtle "spaces not synced" hint shows only when no server space is cached.
+ *
+ * Stage 15 (additive, gated by [settingsEnabled] = [BuildConfig.SPACE_SETTINGS]): when ON,
+ * a long-press on a tab opens a menu with **Space settings** ([onEditSpace]) and a trailing
+ * **"+"** tab creates a new space ([onAddSpace]). When OFF the bar is exactly the Stage-14
+ * read-only bar (no long-press menu, no "+"), so existing call sites/tests are unaffected.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SpaceTabBar(
     spaces: List<SpaceEntity>,
@@ -42,6 +57,9 @@ fun SpaceTabBar(
     onSelect: (String) -> Unit,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
+    onEditSpace: (String) -> Unit = {},
+    onAddSpace: () -> Unit = {},
+    settingsEnabled: Boolean = BuildConfig.SPACE_SETTINGS,
 ) {
     Surface(tonalElevation = 3.dp) {
         Row(
@@ -55,27 +73,59 @@ fun SpaceTabBar(
                 spaces.forEach { space ->
                     val selected = space.id == activeSpaceId
                     val accent = Color(AnnotationRenderer.accentFrom(space.color))
-                    Column(
-                        modifier = Modifier
-                            .clickable { onSelect(space.id) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                            .testTag(SpaceTabTags.tab(space.id)),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = space.name,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) accent else Color.Unspecified,
-                            maxLines = 1,
-                        )
-                        Box(
+                    var menu by remember { mutableStateOf(false) }
+                    Box {
+                        Column(
                             modifier = Modifier
-                                .padding(top = 4.dp)
-                                .height(3.dp)
-                                .width(28.dp)
-                                .background(if (selected) accent else Color.Transparent),
-                        )
+                                .then(
+                                    if (settingsEnabled) {
+                                        Modifier.combinedClickable(
+                                            onClick = { onSelect(space.id) },
+                                            onLongClick = { menu = true },
+                                        )
+                                    } else {
+                                        Modifier.clickable { onSelect(space.id) }
+                                    },
+                                )
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag(SpaceTabTags.tab(space.id)),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                text = space.name,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selected) accent else Color.Unspecified,
+                                maxLines = 1,
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .height(3.dp)
+                                    .width(28.dp)
+                                    .background(if (selected) accent else Color.Transparent),
+                            )
+                        }
+                        if (settingsEnabled) {
+                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                DropdownMenuItem(
+                                    text = { Text("Space settings") },
+                                    onClick = { menu = false; onEditSpace(space.id) },
+                                    modifier = Modifier.testTag(SpaceTabTags.settings(space.id)),
+                                )
+                            }
+                        }
                     }
+                }
+                // Stage 15: the trailing "+" tab creates a new space (a new agent).
+                if (settingsEnabled) {
+                    Text(
+                        text = "+",
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clickable { onAddSpace() }
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag(SpaceTabTags.ADD),
+                    )
                 }
             }
             if (notSynced) {
@@ -100,6 +150,10 @@ object SpaceTabTags {
     const val BAR = "space_tab_bar"
     const val REFRESH = "space_tab_refresh"
     const val NOT_SYNCED = "space_tab_not_synced"
+    const val ADD = "space_tab_add"
 
     fun tab(id: String) = "space_tab_$id"
+
+    /** Stage 15: the "Space settings" item in a tab's long-press menu. */
+    fun settings(id: String) = "space_tab_settings_$id"
 }

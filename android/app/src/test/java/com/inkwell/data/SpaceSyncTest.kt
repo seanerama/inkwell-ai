@@ -80,6 +80,8 @@ class SpaceSyncTest {
     private class FakeDeviceApi(private val spaces: List<Space>) : DeviceApi {
         override suspend fun health() = HealthResponse("ok", "test", "device-api/v1")
         override suspend fun spaces() = spaces
+        override suspend fun createSpace(body: com.inkwell.net.SpaceCreateRequest): Space = error("unused")
+        override suspend fun patchSpace(id: String, body: com.inkwell.net.SpacePatchRequest): Space = error("unused")
         override suspend fun createJob(body: JobCreateRequest): Job = error("unused")
         override suspend fun getJob(id: String): Job = error("unused")
         override suspend fun cancelJob(id: String): Job = error("unused")

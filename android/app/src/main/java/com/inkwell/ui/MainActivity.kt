@@ -112,6 +112,24 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Stage 15: on-device space editing (rename / colour / model / prompt) and new spaces.
+    // Uses the current pairing for the network calls, mirrors the returned row into Room, then
+    // asks the Library ViewModel to re-load its tabs (selecting the created space).
+    private val spaceSettingsViewModel: SpaceSettingsViewModel by viewModels {
+        val tokenStore = EncryptedTokenStore(applicationContext)
+        viewModelFactory {
+            initializer {
+                SpaceSettingsViewModel(
+                    deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
+                    spaceSync = spaceSync,
+                    upsertSpace = { db.spaceDao().upsert(it) },
+                    loadSpaces = { canvasRepository.allSpaces() },
+                    onSpacesChanged = { selectId -> libraryViewModel.reloadSpacesSelecting(selectId) },
+                )
+            }
+        }
+    }
+
     private val libraryViewModel: LibraryViewModel by viewModels {
         val library = LibraryRepository(
             folderDao = db.folderDao(),
@@ -194,6 +212,7 @@ class MainActivity : ComponentActivity() {
             LibraryScreen(
                 viewModel = libraryViewModel,
                 onOpenCanvas = { selectedCanvasId = it },
+                settingsViewModel = spaceSettingsViewModel,
                 loadThumbnail = { canvas ->
                     val f = thumbnailRenderer.file(canvas.id)
                     if (f.exists()) {

@@ -253,6 +253,32 @@ class LibraryViewModel(
         }
     }
 
+    /**
+     * Stage 15: after an on-device space edit or create, re-load the tab mirror from Room
+     * (the settings ViewModel has already PATCHed/POSTed and run [SpaceSync.refresh]) and, for
+     * a create, select [selectId] so its (empty) Library shows. A no-op under the flag-OFF path.
+     */
+    fun reloadSpacesSelecting(selectId: String?) {
+        if (!spacesEnabled) return
+        viewModelScope.launch {
+            loadSpaces()
+            spacesNotSynced = false
+            val ids = spaces.map { it.id }.toSet()
+            val target = selectId?.takeIf { it in ids }
+                ?: activeSpaceId?.takeIf { it in ids }
+                ?: spaces.firstOrNull()?.id
+            if (target != null && target != activeSpaceId) {
+                activeSpaceId = target
+                spaceId = target
+                saveActiveSpaceId(target)
+                breadcrumb.clear()
+                folderId = null
+                showTrash = false
+            }
+            refresh()
+        }
+    }
+
     /** Move a canvas to another space's root (Move… dialog "Other spaces"). */
     fun moveCanvasToSpace(id: String, targetSpaceId: String) {
         viewModelScope.launch { library.moveCanvasToSpace(id, targetSpaceId); refresh() }
