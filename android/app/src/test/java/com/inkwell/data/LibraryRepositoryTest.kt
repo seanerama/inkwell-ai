@@ -41,6 +41,15 @@ class LibraryRepositoryTest {
         override suspend fun move(id: String, parentId: String?, updatedAt: Long) {
             replace(id) { it.copy(parentId = parentId, updatedAt = updatedAt) }
         }
+        override suspend fun moveToSpace(id: String, spaceId: String, parentId: String?, updatedAt: Long) {
+            replace(id) { it.copy(spaceId = spaceId, parentId = parentId, updatedAt = updatedAt) }
+        }
+        override suspend fun setSpace(id: String, spaceId: String, updatedAt: Long) {
+            replace(id) { it.copy(spaceId = spaceId, updatedAt = updatedAt) }
+        }
+        override suspend fun reassignSpace(oldSpaceId: String, newSpaceId: String) {
+            store.indices.forEach { i -> if (store[i].spaceId == oldSpaceId) store[i] = store[i].copy(spaceId = newSpaceId) }
+        }
         override suspend fun setDeletedAt(id: String, deletedAt: Long?) {
             replace(id) { it.copy(deletedAt = deletedAt) }
         }
@@ -76,6 +85,15 @@ class LibraryRepositoryTest {
         }
         override suspend fun move(id: String, folderId: String?, updatedAt: Long) {
             replace(id) { it.copy(folderId = folderId, updatedAt = updatedAt) }
+        }
+        override suspend fun moveToSpace(id: String, spaceId: String, updatedAt: Long) {
+            replace(id) { it.copy(spaceId = spaceId, folderId = null, updatedAt = updatedAt) }
+        }
+        override suspend fun setSpace(id: String, spaceId: String, updatedAt: Long) {
+            replace(id) { it.copy(spaceId = spaceId, updatedAt = updatedAt) }
+        }
+        override suspend fun reassignSpace(oldSpaceId: String, newSpaceId: String) {
+            store.indices.forEach { i -> if (store[i].spaceId == oldSpaceId) store[i] = store[i].copy(spaceId = newSpaceId) }
         }
         override suspend fun setDeletedAt(id: String, deletedAt: Long?) {
             replace(id) { it.copy(deletedAt = deletedAt) }
@@ -254,6 +272,67 @@ class LibraryRepositoryTest {
             "Untitled 4",
             LibraryRepository.nextUntitledTitle(listOf("Untitled 1", "Untitled 3", "Other")),
         )
+    }
+
+    // --- Stage 14: move between spaces (ADR-0010) ---
+
+    @Test
+    fun moveCanvasToSpace_sets_space_and_clears_folder_and_keeps_ink() = runTest {
+        val fx = Fixture()
+        val folder = fx.repo.createFolder(space, null, "Network")
+        val canvas = fx.repo.createCanvas(space, folderId = folder.id)
+        val layersBefore = fx.layerDao.forCanvas(canvas.id)
+
+        fx.now = 7_000L
+        fx.repo.moveCanvasToSpace(canvas.id, "space-learning")
+
+        val moved = fx.canvasDao.byId(canvas.id)!!
+        assertEquals("space-learning", moved.spaceId)
+        assertNull("moves to the target space root", moved.folderId)
+        assertEquals(7_000L, moved.updatedAt)
+        // Ink rides along untouched.
+        assertEquals(layersBefore, fx.layerDao.forCanvas(canvas.id))
+        // It no longer lists in the source space, and shows at the target root.
+        assertTrue(fx.repo.contents(space, folder.id).canvases.isEmpty())
+        assertEquals(listOf(canvas.id), fx.repo.contents("space-learning", null).canvases.map { it.id })
+    }
+
+    @Test
+    fun moveFolderToSpace_carries_the_whole_subtree_including_trashed() = runTest {
+        val fx = Fixture()
+        val parent = fx.repo.createFolder(space, null, "Network")
+        val child = fx.repo.createFolder(space, parent.id, "Diagrams")
+        val inParent = fx.repo.createCanvas(space, folderId = parent.id)
+        val inChild = fx.repo.createCanvas(space, folderId = child.id)
+        // A trashed canvas in the subtree must move too.
+        fx.now = 2_000L
+        fx.repo.deleteCanvas(inChild.id)
+
+        fx.now = 8_000L
+        fx.repo.moveFolderToSpace(space, parent.id, "space-business")
+
+        // Every folder and canvas now belongs to the target space.
+        val movedParent = fx.folderDao.byId(parent.id)!!
+        val movedChild = fx.folderDao.byId(child.id)!!
+        assertEquals("space-business", movedParent.spaceId)
+        assertNull("moved root reparented to the target root", movedParent.parentId)
+        assertEquals("space-business", movedChild.spaceId)
+        assertEquals("subtree structure preserved", parent.id, movedChild.parentId)
+        assertEquals("space-business", fx.canvasDao.byId(inParent.id)!!.spaceId)
+        val movedTrashed = fx.canvasDao.byId(inChild.id)!!
+        assertEquals("space-business", movedTrashed.spaceId)
+        assertNotNull("still trashed after the move", movedTrashed.deletedAt)
+        // Nothing is left behind in the source space.
+        assertTrue(fx.folderDao.allForSpace(space).isEmpty())
+        assertTrue(fx.canvasDao.allForSpace(space).isEmpty())
+    }
+
+    @Test
+    fun moveFolderToSpace_onto_same_space_is_a_noop() = runTest {
+        val fx = Fixture()
+        val parent = fx.repo.createFolder(space, null, "Network")
+        fx.repo.moveFolderToSpace(space, parent.id, space)
+        assertEquals(space, fx.folderDao.byId(parent.id)!!.spaceId)
     }
 
     private fun canvas(

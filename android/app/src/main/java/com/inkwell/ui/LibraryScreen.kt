@@ -43,8 +43,10 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.inkwell.BuildConfig
 import com.inkwell.data.CanvasEntity
 import com.inkwell.data.FolderEntity
+import com.inkwell.data.SpaceEntity
 
 /** A folder/canvas the context menu, rename, or move dialog is currently acting on. */
 private data class TileRef(val isFolder: Boolean, val id: String, val name: String)
@@ -78,6 +80,16 @@ fun LibraryScreen(
 
     Box(modifier = modifier.fillMaxSize().testTag(LibraryTags.SCREEN)) {
         Column(modifier = Modifier.fillMaxSize()) {
+            // Stage 14: the server-mirrored space tab bar sits above the breadcrumb (SPEC §9.3).
+            if (BuildConfig.SPACES && viewModel.spaces.isNotEmpty()) {
+                SpaceTabBar(
+                    spaces = viewModel.spaces,
+                    activeSpaceId = viewModel.activeSpaceId,
+                    notSynced = viewModel.spacesNotSynced,
+                    onSelect = { viewModel.selectSpace(it) },
+                    onRefresh = { viewModel.refreshSpaces() },
+                )
+            }
             BreadcrumbBar(viewModel = viewModel)
 
             if (viewModel.showTrash) {
@@ -174,9 +186,20 @@ fun LibraryScreen(
         MoveDialog(
             target = target,
             folders = viewModel.allFolders,
+            // Stage 14: the OTHER space tabs, offered as move targets ("Other spaces").
+            otherSpaces = if (BuildConfig.SPACES) {
+                viewModel.spaces.filter { it.id != viewModel.activeSpaceId }
+            } else {
+                emptyList()
+            },
             onPick = { destId ->
                 if (target.isFolder) viewModel.moveFolder(target.id, destId)
                 else viewModel.moveCanvas(target.id, destId)
+                moveFor = null
+            },
+            onPickSpace = { spaceId ->
+                if (target.isFolder) viewModel.moveFolderToSpace(target.id, spaceId)
+                else viewModel.moveCanvasToSpace(target.id, spaceId)
                 moveFor = null
             },
             onDismiss = { moveFor = null },
@@ -431,7 +454,9 @@ private fun TextPromptDialog(
 private fun MoveDialog(
     target: TileRef,
     folders: List<FolderEntity>,
+    otherSpaces: List<SpaceEntity>,
     onPick: (String?) -> Unit,
+    onPickSpace: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -457,6 +482,22 @@ private fun MoveDialog(
                                 .testTag(LibraryTags.moveTarget(folder.id)),
                         ) { Text(folder.name) }
                     }
+                // Stage 14: move to another space's root ("Other spaces").
+                if (otherSpaces.isNotEmpty()) {
+                    Text(
+                        "Other spaces",
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    otherSpaces.forEach { space ->
+                        OutlinedButton(
+                            onClick = { onPickSpace(space.id) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag(LibraryTags.moveSpaceTarget(space.id)),
+                        ) { Text(space.name) }
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
@@ -502,4 +543,7 @@ object LibraryTags {
     fun folderTile(id: String) = "library_folder_$id"
     fun canvasTile(id: String) = "library_canvas_$id"
     fun moveTarget(id: String) = "library_move_target_$id"
+
+    /** Stage 14: a "move to another space" target in the Move… dialog. */
+    fun moveSpaceTarget(id: String) = "library_move_space_$id"
 }

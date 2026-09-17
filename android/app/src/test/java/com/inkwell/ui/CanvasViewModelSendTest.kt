@@ -65,6 +65,7 @@ class CanvasViewModelSendTest {
         override suspend fun upsert(space: SpaceEntity) { store.removeAll { it.id == space.id }; store.add(space) }
         override suspend fun all() = store.sortedBy { it.position }
         override suspend fun byId(id: String) = store.firstOrNull { it.id == id }
+        override suspend fun delete(id: String) { store.removeAll { it.id == id } }
     }
 
     private class FakeCanvasDao : CanvasDao {
@@ -86,6 +87,15 @@ class CanvasViewModelSendTest {
         }
         override suspend fun move(id: String, folderId: String?, updatedAt: Long) {
             val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(folderId = folderId, updatedAt = updatedAt)
+        }
+        override suspend fun moveToSpace(id: String, spaceId: String, updatedAt: Long) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(spaceId = spaceId, folderId = null, updatedAt = updatedAt)
+        }
+        override suspend fun setSpace(id: String, spaceId: String, updatedAt: Long) {
+            val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(spaceId = spaceId, updatedAt = updatedAt)
+        }
+        override suspend fun reassignSpace(oldSpaceId: String, newSpaceId: String) {
+            store.indices.forEach { i -> if (store[i].spaceId == oldSpaceId) store[i] = store[i].copy(spaceId = newSpaceId) }
         }
         override suspend fun setDeletedAt(id: String, deletedAt: Long?) {
             val i = store.indexOfFirst { it.id == id }; if (i >= 0) store[i] = store[i].copy(deletedAt = deletedAt)
@@ -239,6 +249,9 @@ class CanvasViewModelSendTest {
             formalizedCanvasStore = repo,
             ioDispatcher = dispatcher,
             exporter = fakeExporter,
+            // These Stage-7/10/12 send tests exercise the flag-OFF space path (resolve the
+            // "work" space by slug). The Stage-14 canvas-space send path has its own test.
+            spacesEnabled = false,
         ).also { assertTrue("canvas opened synchronously on the unconfined dispatcher", it.ready) }
     }
 

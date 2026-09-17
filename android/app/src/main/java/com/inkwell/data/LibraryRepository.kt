@@ -36,6 +36,12 @@ class LibraryRepository(
     private val layerDao: LayerDao,
     private val idGen: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /**
+     * Runs a block atomically (Stage 14 move-between-spaces). The app wires
+     * `db.withTransaction { }`; the default runs the block inline so JVM tests with fake
+     * DAOs need no real database (the move is a small, ordered set of row updates).
+     */
+    private val runInTransaction: suspend (suspend () -> Unit) -> Unit = { it() },
 ) {
 
     /** List a folder's live contents (null [folderId] = the space root). */
@@ -141,6 +147,46 @@ class LibraryRepository(
 
     /** Move a canvas into [folderId] (null = root); bumps `updated_at`. Strokes untouched. */
     suspend fun moveCanvas(id: String, folderId: String?) = canvasDao.move(id, folderId, clock())
+
+    // --- Stage 14 (ADR-0010): move a canvas / folder subtree to ANOTHER space's root ---
+
+    /**
+     * Move a canvas to [targetSpaceId]'s root: set `space_id` and clear `folder_id` (a folder
+     * id from the old space is meaningless in the new one). Cards and layers are untouched —
+     * ink rides along with the canvas. Agent-origin canvases may now differ from the server's
+     * `canvases.space_id`; accepted per ADR-0010 (Phase 4 reconciles).
+     */
+    suspend fun moveCanvasToSpace(id: String, targetSpaceId: String) =
+        canvasDao.moveToSpace(id, targetSpaceId, clock())
+
+    /**
+     * Move a whole folder subtree to [targetSpaceId]'s root. The moved folder is reparented to
+     * the target root (`parent_id = null`); every descendant folder and canvas — INCLUDING
+     * trashed ones — has its `space_id` rewritten while keeping the subtree's internal shape.
+     * Reuses the [deleteFolder] subtree walk and runs in one transaction so a partial move can
+     * never strand ink under a space that no longer owns its parent. No-op onto the same space.
+     */
+    suspend fun moveFolderToSpace(spaceId: String, folderId: String, targetSpaceId: String) {
+        if (spaceId == targetSpaceId) return
+        val now = clock()
+        val childrenByParent = folderDao.allForSpace(spaceId).groupBy { it.parentId }
+        val subtree = mutableListOf<String>()
+        val stack = ArrayDeque<String>()
+        stack.addLast(folderId)
+        while (stack.isNotEmpty()) {
+            val id = stack.removeLast()
+            subtree.add(id)
+            childrenByParent[id]?.forEach { stack.addLast(it.id) }
+        }
+        val subtreeSet = subtree.toSet()
+        val canvasesToMove = canvasDao.allForSpace(spaceId).filter { it.folderId in subtreeSet }
+        runInTransaction {
+            // The moved root: reparent to the target space root, keeping the tree below it.
+            folderDao.moveToSpace(folderId, targetSpaceId, null, now)
+            subtree.forEach { fid -> if (fid != folderId) folderDao.setSpace(fid, targetSpaceId, now) }
+            canvasesToMove.forEach { c -> canvasDao.setSpace(c.id, targetSpaceId, now) }
+        }
+    }
 
     /** Rename a canvas (bumps `updated_at`). */
     suspend fun renameCanvas(id: String, title: String) = canvasDao.rename(id, title, clock())

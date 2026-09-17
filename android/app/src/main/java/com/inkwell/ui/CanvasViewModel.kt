@@ -15,6 +15,7 @@ import com.inkwell.data.CanvasRepository
 import com.inkwell.data.CardStatePersistence
 import com.inkwell.data.FormalizedCanvasStore
 import com.inkwell.data.LayerRepository
+import com.inkwell.data.SpaceSync
 import com.inkwell.data.StrokeCommitData
 import com.inkwell.ink.StrokeCommit
 import com.inkwell.net.Connectivity
@@ -70,6 +71,18 @@ class CanvasViewModel(
      * OFF → the option is hidden and no redraw handling runs. Default [BuildConfig.FORMALIZE].
      */
     val formalizeEnabled: Boolean = BuildConfig.FORMALIZE,
+    /**
+     * Stage 14 kill-switch: ON → jobs are posted with the CURRENT canvas's `space_id`
+     * (server-mirrored, ADR-0010) and agent marks use the space's accent; OFF → the legacy
+     * single-space behaviour (resolve the "work" space by slug on send). Default [BuildConfig.SPACES].
+     */
+    val spacesEnabled: Boolean = BuildConfig.SPACES,
+    /**
+     * Stage 14: mirrors the server's spaces + reconciles the local placeholder (ADR-0010).
+     * Null in lightweight tests / the flag-OFF path. Refreshed at send time so a freshly
+     * paired device reconciles its placeholder to the server id before the job is posted.
+     */
+    private val spaceSync: SpaceSync? = null,
     /**
      * Stage 12: the seam that materialises a `canvas.formalize` redraw as a local canvas
      * (the app injects [CanvasRepository]). Null in lightweight tests / when formalize is
@@ -216,12 +229,24 @@ class CanvasViewModel(
     /** Monotonic token so a newer card tap cancels an older pulse's auto-clear. */
     private var pulseToken = 0
 
-    /** The resolved server `work` space id (looked up by slug, cached per session). */
+    /** The resolved server `work` space id (looked up by slug, cached per session). Flag-OFF only. */
     private var workSpaceId: String? = null
 
+    /** Stage 14: the open canvas's own space id (server-mirrored under [spacesEnabled]). */
+    private var currentSpaceId: String? = null
+
+    /** Stage 14: server space ids from the last successful mirror refresh (block check on send). */
+    private var serverSpaceIds: Set<String> = emptySet()
+
     // --- Debug-only (BuildConfig.DEBUG) export-preview + fixture-render state ---
-    /** Space accent color for agent annotations (SPEC §6.3). */
-    val accentColor: Int = AnnotationRenderer.DEFAULT_ACCENT
+    /**
+     * Space accent colour for agent annotations (SPEC §6.3). Derived per opened canvas from
+     * its space `color` (Stage 14); [AnnotationRenderer.DEFAULT_ACCENT] until a canvas loads
+     * or when the space has no colour. Observed by [CanvasScreen] so a per-space accent takes
+     * effect as soon as the canvas opens.
+     */
+    var accentColor by mutableStateOf(AnnotationRenderer.DEFAULT_ACCENT)
+        private set
 
     var showExportPreview by mutableStateOf(false)
         private set
@@ -257,9 +282,12 @@ class CanvasViewModel(
     private fun applyState(state: com.inkwell.data.CanvasState) {
         inkLayerId = state.inkLayerId
         canvasId = state.canvasId
+        currentSpaceId = state.spaceId
         currentFolderId = state.folderId
         title = state.title
         canvasOrigin = state.origin
+        // Stage 14: agent marks take the canvas's space accent (fallback DEFAULT_ACCENT).
+        accentColor = AnnotationRenderer.accentFrom(state.spaceColor)
         canvasWidth = state.widthCu
         canvasHeight = state.heightCu
         strokes.clear()
@@ -287,6 +315,22 @@ class CanvasViewModel(
         agentAnnotations = emptyList()
         viewModelScope.launch {
             repository.openCanvas(canvasId)?.let { applyState(it) }
+        }
+    }
+
+    /**
+     * Stage 14 trigger: prime the server-space mirror (app start when a token is stored).
+     * Non-fatal — an offline/unpaired failure keeps the cached mirror; the first send retries.
+     */
+    fun refreshSpaces() {
+        if (!spacesEnabled) return
+        val sync = spaceSync ?: return
+        viewModelScope.launch {
+            try {
+                serverSpaceIds = sync.refresh()
+            } catch (_: Exception) {
+                // Non-fatal: cached mirror is used; send-time refresh will try again.
+            }
         }
     }
 
@@ -501,14 +545,35 @@ class CanvasViewModel(
                 is CanvasExporter.Result.TooLarge -> { sendStatus = result.message; return@launch }
             }
 
-            // Resolve the seeded work space id (by slug), cached per session.
-            val spaceId = workSpaceId ?: try {
-                dev.workSpaceId()?.also { workSpaceId = it }
-            } catch (e: Exception) {
-                sendStatus = "Could not load spaces: ${e.message ?: e.javaClass.simpleName}"
-                return@launch
+            // Resolve the space to post with.
+            val spaceId: String = if (spacesEnabled) {
+                // Stage 14 (ADR-0010): post with the CANVAS's own space id. Refresh the mirror
+                // first (non-fatal) so a freshly paired device reconciles its placeholder to
+                // the server id; then re-read the canvas's space id (it may have been repointed).
+                try {
+                    spaceSync?.let { serverSpaceIds = it.refresh() }
+                } catch (_: Exception) {
+                    // Offline / 401 / unpaired: use the cached mirror (non-fatal).
+                }
+                val csid = repository.spaceIdForCanvas(cId) ?: currentSpaceId
+                currentSpaceId = csid
+                if (csid == null || csid !in serverSpaceIds) {
+                    // A placeholder id with no server row after a refresh attempt: block.
+                    sendStatus = "Spaces not synced yet — check the connection and try again."
+                    return@launch
+                }
+                csid
+            } else {
+                // Flag OFF: the seeded `work` space id, looked up by slug, cached per session.
+                val resolved = workSpaceId ?: try {
+                    dev.workSpaceId()?.also { workSpaceId = it }
+                } catch (e: Exception) {
+                    sendStatus = "Could not load spaces: ${e.message ?: e.javaClass.simpleName}"
+                    return@launch
+                }
+                if (resolved == null) { sendStatus = "No 'work' space on the server."; return@launch }
+                resolved
             }
-            if (spaceId == null) { sendStatus = "No 'work' space on the server."; return@launch }
 
             val request = JobRequestBuilder.build(
                 type = type,
