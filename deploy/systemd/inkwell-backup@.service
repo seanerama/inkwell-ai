@@ -1,0 +1,19 @@
+# Inkwell AI nightly backup (ADR-0011, Stage 17). Templated per environment:
+#   inkwell-backup@staging.service, inkwell-backup@prod.service.
+# Installed and enabled by host-setup.sh, which substitutes OPERATOR_PLACEHOLDER with the
+# operator user (docker-group member; the set must be operator-owned, not root-owned).
+# Triggered by inkwell-backup@%i.timer; view results with:
+#   journalctl -u inkwell-backup@staging.service
+#   systemctl status inkwell-backup@staging.timer
+[Unit]
+Description=Inkwell AI backup (%i)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=OPERATOR_PLACEHOLDER
+WorkingDirectory=/srv/inkwell/%i
+ExecStart=/srv/inkwell/bin/backup.sh %i
+TimeoutStartSec=0

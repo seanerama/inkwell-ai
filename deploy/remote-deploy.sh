@@ -28,6 +28,25 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
+# Pre-deploy backup (ADR-0011): a snapshot before any migration so rollback always has a
+# matching set. Refresh the on-host copies of the backup/restore scripts (shipped to /tmp
+# by deploy.sh) into /srv/inkwell/bin so the timer and deploys run the same version.
+ENV_NAME="$(basename "${REMOTE_DIR}")"
+mkdir -p /srv/inkwell/bin
+[ -f /tmp/inkwell-backup.sh ]  && install -m 0755 /tmp/inkwell-backup.sh  /srv/inkwell/bin/backup.sh
+[ -f /tmp/inkwell-restore.sh ] && install -m 0755 /tmp/inkwell-restore.sh /srv/inkwell/bin/restore.sh
+echo ">> pre-deploy backup (label pre-deploy)"
+set +e
+/srv/inkwell/bin/backup.sh "${ENV_NAME}" --label pre-deploy
+BACKUP_RC=$?
+set -e
+if [ "${BACKUP_RC}" -eq 1 ]; then
+  echo "!! pre-deploy backup FAILED locally (exit 1) — aborting deploy (no snapshot, no migrate)." >&2
+  exit 1
+elif [ "${BACKUP_RC}" -eq 2 ]; then
+  echo "!! pre-deploy backup: off-host copy failed (exit 2). Local snapshot is present; continuing." >&2
+fi
+
 echo ">> migrate"
 docker compose -f compose.yml run --rm -T api alembic upgrade head </dev/null
 echo ">> seed"
@@ -50,6 +69,20 @@ if [ "${HEALTHY}" -ne 1 ]; then
   echo ">> health check failed; rollback with: deploy.sh <env> ${PREVIOUS:-<previous-ref>}" >&2
   docker compose -f compose.yml logs --tail=50 api </dev/null
   exit 1
+fi
+
+# Backup freshness (ADR-0011): the nightly timer should keep `latest` under 48h old. The
+# pre-deploy backup above just refreshed it, so an old `latest` here means the timer is
+# broken and deserves a look.
+LATEST="/srv/inkwell/backups/${ENV_NAME}/latest"
+if [ -e "${LATEST}" ]; then
+  LATEST_EPOCH="$(stat -c %Y "$(readlink -f "${LATEST}")" 2>/dev/null || echo 0)"
+  AGE_H="$(( ( $(date -u +%s) - LATEST_EPOCH ) / 3600 ))"
+  if [ "${AGE_H}" -ge 48 ]; then
+    echo "!! WARNING: latest ${ENV_NAME} backup is ${AGE_H}h old — check inkwell-backup@${ENV_NAME}.timer" >&2
+  fi
+else
+  echo "!! WARNING: no latest backup symlink for ${ENV_NAME} — is the timer installed?" >&2
 fi
 
 # Deploy canary (Stage 8): when the agent is enabled, prove one real canvas.ask job runs
