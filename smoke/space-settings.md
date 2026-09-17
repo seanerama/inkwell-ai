@@ -134,4 +134,4 @@ tab bar itself), `LIBRARY`, `ONE_TAP_ASK`, `CARD_ACTIONS`, and `FORMALIZE`.
 
 | Date (UTC) | Release | Operator | S1 | S2 | S3 | Offline | Prompt edit changed answer? | Notes |
 |---|---|---|---|---|---|---|---|---|
-| (pending first on-device run) | | | | | | | | |
+| 2026-09-17 02:20 | v0.0.13 | seanerama | pass | pass | pass | n/a | yes | owner: edited the system prompt and the Ask answer reflected it; '+' new space worked on device (stage 16 failure is emulator/test-side) |

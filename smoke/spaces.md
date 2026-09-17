@@ -126,4 +126,4 @@ grid), `ONE_TAP_ASK`, `CARD_ACTIONS`, and `FORMALIZE`.
 
 | Date (UTC) | Release | Operator | S1 | S2 | S3 | Work vs Learning differ? | Notes |
 |---|---|---|---|---|---|---|---|
-| (pending first on-device run) | | | | | | | |
+| 2026-09-17 02:20 | v0.0.13 | seanerama | pass | pass | pass | yes | first on-device run; owner: all steps worked |

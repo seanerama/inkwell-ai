@@ -98,7 +98,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 | `GET /spaces` → four distinct, non-empty prompts | pass (532–559 chars each, distinct openings) |
 | `PATCH` Learning colour → read back `#123456` (switch ON) *or* `403 disabled` (switch OFF) | pass (200, read back #123456, restored) |
 | `PATCH {"slug":...}` → `422 "slug is immutable"` (switch ON) | pass (422 slug is immutable) |
-| `canvas.ask` in Learning reads tutor-toned (operator judgment) | pending — owner on tablet (smoke/spaces.md) |
+| `canvas.ask` in Learning reads tutor-toned (operator judgment) | pass (owner, tablet, 2026-09-17) |
 
 ## Notes
 
