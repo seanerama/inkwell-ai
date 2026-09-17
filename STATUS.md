@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.12
+**Live version:** 0.0.13
 **Deployed at:** 2026-09-16T19:29:06Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:60747bf2a40cda2b17b38f828271efeb22f1b9042564093bd9ed72ad90f284f4 (v0.0.11)
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:373263b3fd1b393059760d3ae7aae5a2e2bf233c1061cf26aea85009965a83d1 (v0.0.12)
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.12 by digest (v0.3: Library + Formalize); all three release lanes green; deploy canary passed live; smoke gate passed 3/3","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:373263b3fd1b393059760d3ae7aae5a2e2bf233c1061cf26aea85009965a83d1","deployed_at":"2026-09-16T22:48:42Z"}
+- **staging:** {"status":"deployed v0.0.13 by digest (v0.4 Phase 3: server spaces, tabs, settings); server-image + APK lanes green, instrumented lane RED on one stage-15 test (deterministic, stage 16 filed); deploy canary passed live; Playwright smoke 3/3; server spaces smoke passed","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:5e8e4755c4b5dae860e544ff4c82f742255c0eb31b6612a156fa4ccbf04849ac","deployed_at":"2026-09-17T01:40:32Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
@@ -21,3 +21,4 @@
 - 2026-09-16: first successful real agent job on staging (canvas.ask replay of the owner's 'what is 1+9=?' export): 3038 in / 161 out tokens.
 - v0.0.12 (stages 11 Library + 12 Formalize) deployed to staging 2026-09-16 by digest; health 0.0.12, canary canvas.ask done (1 annotation, 1 card), Playwright smoke 3/3 incl. new GET /canvases bearer gate (200 [] with tablet token). Prod NOT promoted (confirm gate). On-device smokes pending: smoke/library.md, smoke/formalize.md on the v0.0.12 APK. No new server env vars; client flags LIBRARY and FORMALIZE ON in release by documented exception.
 - 2026-09-16: owner ran smoke/library.md and smoke/formalize.md on the tablet with the v0.0.12 APK — both pass. v0.3 (Library + Formalize) verified on device; staging acceptance complete.
+- v0.0.13 (stages 13–15, Phase 3 spaces) deployed to staging 2026-09-17 by digest. Kill-switch flip: SPACES_EDITABLE=true set in /srv/inkwell/staging/.env (deliberate, so the tablet can edit/create spaces). Seeder backfilled the four default prompts (532–559 chars, distinct). Server spaces smoke: PATCH colour round-trip 200, slug PATCH 422, POST unauth 401. Instrumented lane RED: SpaceSettingsInstrumentedTest.plus_tab_creates_a_space… times out, deterministic on two runs (35170817917, 35171120120) — the APK is released but the '+ new space' flow is UNVERIFIED; bug stage 16 filed. Prod NOT promoted. On-device smokes pending: smoke/spaces.md (Work vs Learning acceptance), smoke/space-settings.md.

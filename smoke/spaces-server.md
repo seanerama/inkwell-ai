@@ -93,12 +93,12 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/
 
 | Check | Result |
 | --- | --- |
-| `GET /v1/health` ok | __________ |
-| Token minted | __________ |
-| `GET /spaces` → four distinct, non-empty prompts | __________ |
-| `PATCH` Learning colour → read back `#123456` (switch ON) *or* `403 disabled` (switch OFF) | __________ |
-| `PATCH {"slug":...}` → `422 "slug is immutable"` (switch ON) | __________ |
-| `canvas.ask` in Learning reads tutor-toned (operator judgment) | __________ |
+| `GET /v1/health` ok | pass (0.0.13, 2026-09-17) |
+| Token minted | pass (existing tablet token) |
+| `GET /spaces` → four distinct, non-empty prompts | pass (532–559 chars each, distinct openings) |
+| `PATCH` Learning colour → read back `#123456` (switch ON) *or* `403 disabled` (switch OFF) | pass (200, read back #123456, restored) |
+| `PATCH {"slug":...}` → `422 "slug is immutable"` (switch ON) | pass (422 slug is immutable) |
+| `canvas.ask` in Learning reads tutor-toned (operator judgment) | pending — owner on tablet (smoke/spaces.md) |
 
 ## Notes
 

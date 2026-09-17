@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.13
+
+### Other
+- Stage 15: Space settings on device — rename, colour, prompt, add a space (#36)
+- [stage 14] Space tabs: server-mirrored spaces, per-space send and accent, move canvas between spaces (#35)
+- Stage 13: Spaces on the server — default per-space prompts, create and edit (#34)
+- Plan v0.4 Phase 3: stages 13 (server spaces), 14 (space tabs + mirror), 15 (space settings); ADR-0010
+- smoke: library + formalize results on v0.0.12 (owner pass on tablet)
+- Release v0.0.12: STATUS staging (v0.3 Library + Formalize shipped, smoke 3/3)
+
 ## 0.0.12
 
 ### Other
