@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     # ADR-0006: non-streaming output cap for the agent call.
     agent_max_tokens: int = 16000
 
+    # Stage 13 kill-switch (default OFF). When false, POST/PATCH /spaces return 403
+    # with error.code="disabled"; GET /spaces is unaffected. Accepts a bare
+    # ``SPACES_EDITABLE`` in addition to the ``INKWELL_``-prefixed form.
+    spaces_editable: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SPACES_EDITABLE", "INKWELL_SPACES_EDITABLE"),
+    )
+
     env: str = "dev"
 
     # NOTE: ANTHROPIC_API_KEY is intentionally NOT a field here. The anthropic SDK

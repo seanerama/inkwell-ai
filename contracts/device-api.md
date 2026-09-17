@@ -164,3 +164,49 @@ validation`). Ordered by `created_at` descending. Each `CanvasOut` is:
 This gives Phase 4's canvas push a base to build on; the `canvas.formalize` redraw itself
 rides back on the polled job (see the `result.canvas` sibling key in `agent-output`), not
 through this route.
+
+### Stage 13 additions — 2026-09-16
+
+Stage 13 implements the two space-editing routes the **frozen route table above already
+lists** (`POST /spaces` → `Space`, `PATCH /spaces/{id}` → `Space` partial). Nothing
+frozen changes — the route table, entity shapes (`Space` = SPEC §4) and the error
+envelope are untouched. This section only documents the request bodies and the error
+codes those routes surface.
+
+**Kill-switch.** Both routes require the bearer token and are additionally gated by the
+server-side `SPACES_EDITABLE` env (default OFF). When off, `POST`/`PATCH /spaces` return
+`403` with `error.code = "disabled"`. `GET /spaces` is never gated.
+
+**`POST /spaces`** → `201` + `Space`. Body `SpaceCreate`:
+
+```json
+{
+  "name": "string (1–120, required)",
+  "slug": "string? (^[a-z0-9-]{1,64}$; derived from name when absent)",
+  "system_prompt": "string? (≤ 8000 chars, default \"\")",
+  "tools": ["string?"],
+  "model": "string? (default \"claude-sonnet-5\")",
+  "color": "string? (#RRGGBB, default #000000)",
+  "position": "int? (default: max(position)+1)"
+}
+```
+
+When `slug` is absent it is derived from `name`: lowercased, every run of non
+`[a-z0-9]` characters becomes `-`, leading/trailing dashes are trimmed, and the result
+is truncated to 64 chars. A derived slug that comes out empty → `422 validation`.
+
+**`PATCH /spaces/{id}`** → `200` + `Space`. Body `SpaceUpdate`: every field of
+`SpaceCreate` optional except `name` limits still apply — `name, system_prompt, tools,
+model, color, position`. Absent fields are left untouched (`exclude_unset` semantics).
+`slug` is **immutable**: if `slug` is present in the body, the route returns `422
+validation` with message "slug is immutable". Unknown `id` → `404 not_found`.
+
+**Error codes** (envelope unchanged — `{ "error": { "code", "message" } }`):
+
+| Status | `error.code` | When |
+| --- | --- | --- |
+| `401` | `unauthorized` | missing/invalid bearer token |
+| `403` | `disabled` | `SPACES_EDITABLE` is off (both routes) |
+| `404` | `not_found` | `PATCH` on an unknown space id |
+| `409` | `conflict` | `POST` with a slug that already exists |
+| `422` | `validation` | bad field (colour, slug pattern, overlong prompt, name length), a derived-empty slug, or `slug` present in a `PATCH` |
