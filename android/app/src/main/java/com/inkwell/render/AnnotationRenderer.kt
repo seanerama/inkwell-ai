@@ -499,10 +499,16 @@ class AnnotationRenderer(
         /** Fallback accent when a space has no color yet. */
         const val DEFAULT_ACCENT = 0xFF3B6EA5.toInt()
 
-        /** Parse a space accent `#RRGGBB`, falling back to [DEFAULT_ACCENT]. */
+        /**
+         * Parse a space accent `#RRGGBB`, falling back to [DEFAULT_ACCENT] on ANY failure —
+         * a malformed colour ([IllegalArgumentException]) or an environment where
+         * `android.graphics.Color` is unavailable (JVM unit tests throw a "not mocked"
+         * [RuntimeException]). This keeps the accent purely a display concern: it must never
+         * abort a caller on the critical path (e.g. the canvas open that sets `ready`).
+         */
         fun accentFrom(hex: String?): Int = try {
             if (hex == null) DEFAULT_ACCENT else Color.parseColor(hex)
-        } catch (_: IllegalArgumentException) {
+        } catch (_: Exception) {
             DEFAULT_ACCENT
         }
     }
