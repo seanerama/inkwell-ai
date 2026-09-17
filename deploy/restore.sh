@@ -30,8 +30,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 [ -n "$BACKUP_DIR" ] || usage
-BACKUP_DIR="$(cd "$BACKUP_DIR" 2>/dev/null && pwd || true)"
-[ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ] || { echo "!! backup dir not found" >&2; exit 1; }
+RESOLVED="$(cd "$BACKUP_DIR" 2>/dev/null && pwd)" || RESOLVED=""
+if [ -z "$RESOLVED" ] || [ ! -d "$RESOLVED" ]; then
+  echo "!! backup dir not found: $BACKUP_DIR" >&2
+  exit 1
+fi
+BACKUP_DIR="$RESOLVED"
 
 MANIFEST="$BACKUP_DIR/manifest.json"
 for f in "$MANIFEST" "$BACKUP_DIR/db.dump" "$BACKUP_DIR/blobs.tar.zst"; do
