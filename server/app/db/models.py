@@ -217,3 +217,9 @@ class DeviceToken(Base):
     )
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Stage 18 dual-pepper grace window (ADR-0008): which pepper generation the stored
+    # hash was computed under. Bumped when verify_token re-hashes a row from the previous
+    # pepper to the current one, so the operator can see all live tokens have migrated.
+    hash_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="1", default=1
+    )

@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # ADR-0008: server-side pepper mixed into the token hash. Override in every env.
     token_pepper: str = "dev-pepper-change-me"
 
+    # ADR-0008 dual-pepper grace window (Stage 18): the PREVIOUS pepper during a
+    # rotation. When set (non-empty), verify_token falls back to it on a current-pepper
+    # miss and transparently re-hashes the row to the current pepper. Unset (the default)
+    # is single-pepper behaviour, i.e. exactly as before this stage.
+    token_pepper_previous: str | None = None
+
     # ADR-0004: HMAC key for signed, expiring blob URLs.
     blob_signing_key: str = "dev-blob-key-change-me"
 
