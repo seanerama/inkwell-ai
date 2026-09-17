@@ -2,11 +2,13 @@
 # One-time host preparation for Inkwell AI on mini-hp01 (ADR-0005). Needs sudo, so the
 # OPERATOR runs it interactively once per host; deploy.sh never needs sudo afterwards.
 #
-#   scp deploy/host-setup.sh deploy/systemd/*.service smahoney@mini-hp01.taile0ffc4.ts.net:/tmp/
+#   scp deploy/host-setup.sh deploy/systemd/* deploy/backup.sh deploy/restore.sh \
+#       smahoney@mini-hp01.taile0ffc4.ts.net:/tmp/
 #   ssh -t smahoney@mini-hp01.taile0ffc4.ts.net 'bash /tmp/host-setup.sh'
 #
 # What it does: docker group, /srv/inkwell/{staging,prod}, systemd units (boot-time
-# `compose up` only), tailscale serve on 8444 (staging) and 8443 (prod).
+# `compose up` only), the nightly backup timer + scripts (ADR-0011), the backup tools
+# (zstd/age/rclone), and tailscale serve on 8444 (staging) and 8443 (prod).
 # It never writes secrets: each env's .env is created from .env.example by the operator.
 set -euo pipefail
 
@@ -26,7 +28,34 @@ for env in staging prod; do
     sudo cp "/tmp/inkwell-${env}.service" "/etc/systemd/system/inkwell-${env}.service"
   fi
 done
+
+echo ">> backup tooling (ADR-0011): zstd + age + rclone"
+sudo apt-get update -qq
+sudo apt-get install -y -qq zstd age rclone
+
+echo ">> backup/restore scripts -> /srv/inkwell/bin (refreshed by deploy.sh thereafter)"
+sudo install -d -o "${OPERATOR}" -g "${OPERATOR}" -m 0755 /srv/inkwell/bin
+for s in backup restore; do
+  if [ -f "/tmp/inkwell-${s}.sh" ]; then
+    sudo install -o "${OPERATOR}" -g "${OPERATOR}" -m 0755 "/tmp/inkwell-${s}.sh" "/srv/inkwell/bin/${s}.sh"
+  fi
+done
+
+echo ">> nightly backup timer units (templated per env; run as the operator)"
+if [ -f /tmp/inkwell-backup@.service ]; then
+  sudo sed "s/OPERATOR_PLACEHOLDER/${OPERATOR}/" /tmp/inkwell-backup@.service \
+    | sudo tee /etc/systemd/system/inkwell-backup@.service >/dev/null
+fi
+if [ -f /tmp/inkwell-backup@.timer ]; then
+  sudo cp /tmp/inkwell-backup@.timer /etc/systemd/system/inkwell-backup@.timer
+fi
+
 sudo systemctl daemon-reload
+
+echo ">> enable nightly backup for staging (03:30 UTC)"
+if [ -f /etc/systemd/system/inkwell-backup@.timer ]; then
+  sudo systemctl enable --now inkwell-backup@staging.timer
+fi
 
 echo ">> tailscale serve: staging :8444 -> 127.0.0.1:8001, prod :8443 -> 127.0.0.1:8000"
 echo "   (443 belongs to another service on this host and is left alone)"

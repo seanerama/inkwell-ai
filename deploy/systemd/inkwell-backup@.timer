@@ -1,0 +1,15 @@
+# Inkwell AI nightly backup timer (ADR-0011, Stage 17). Templated per environment:
+#   inkwell-backup@staging.timer, inkwell-backup@prod.timer.
+# Installed and enabled by host-setup.sh. Persistent=true catches up a missed run after
+# the host was off; RandomizedDelaySec spreads load off the exact minute.
+[Unit]
+Description=Nightly Inkwell AI backup (%i)
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10m
+Unit=inkwell-backup@%i.service
+
+[Install]
+WantedBy=timers.target

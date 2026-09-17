@@ -38,9 +38,13 @@ HEALTH_URL="https://${HOST}:${HEALTH_PORT}/v1/health"
 
 echo ">> deploying ${IMAGE_REF} to ${ENVIRONMENT} (${REMOTE_DIR}) on ${HOST}"
 
-# 1. Ship compose and the host-side deploy script (the .env already exists on the host).
+# 1. Ship compose, the host-side deploy script, and the backup/restore scripts (ADR-0011;
+#    remote-deploy.sh installs them under /srv/inkwell/bin and takes a pre-deploy backup).
+#    The .env already exists on the host.
 scp -q deploy/compose.yml "${USER_AT_HOST}:${REMOTE_DIR}/compose.yml"
 scp -q deploy/remote-deploy.sh "${USER_AT_HOST}:/tmp/inkwell-remote-deploy.sh"
+scp -q deploy/backup.sh "${USER_AT_HOST}:/tmp/inkwell-backup.sh"
+scp -q deploy/restore.sh "${USER_AT_HOST}:/tmp/inkwell-restore.sh"
 
 # 2. Run it on the host as a file, not via `bash -s` over stdin: docker compose
 #    exec/run read stdin and would swallow the rest of a piped script.
