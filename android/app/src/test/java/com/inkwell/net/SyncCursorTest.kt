@@ -31,6 +31,8 @@ class SyncCursorTest {
         val cursorsSent = mutableListOf<String?>()
         override suspend fun health() = error("unused")
         override suspend fun spaces() = error("unused")
+        override suspend fun createSpace(body: SpaceCreateRequest): Space = error("unused")
+        override suspend fun patchSpace(id: String, body: SpacePatchRequest): Space = error("unused")
         override suspend fun createJob(body: JobCreateRequest) = error("unused")
         override suspend fun getJob(id: String) = error("unused")
         override suspend fun cancelJob(id: String) = error("unused")

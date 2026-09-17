@@ -137,6 +137,8 @@ class CanvasViewModelSendTest {
                 model = "claude-sonnet-5", color = "#3B6EA5", position = 0, createdAt = "2026-09-15T00:00:00Z",
             ),
         )
+        override suspend fun createSpace(body: com.inkwell.net.SpaceCreateRequest): Space = error("unused")
+        override suspend fun patchSpace(id: String, body: com.inkwell.net.SpacePatchRequest): Space = error("unused")
         override suspend fun createJob(body: JobCreateRequest): Job {
             submitted += body
             return job("job-${submitted.size}", body.type, "queued", null)

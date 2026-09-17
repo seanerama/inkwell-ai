@@ -21,6 +21,14 @@ interface DeviceApi {
     @GET("v1/spaces")
     suspend fun spaces(): List<Space>
 
+    /** Stage 15: create a space (a new agent) → the created wire [Space]. */
+    @POST("v1/spaces")
+    suspend fun createSpace(@Body body: SpaceCreateRequest): Space
+
+    /** Stage 15: partial-update a space (name/colour/model/prompt/position) → the updated [Space]. */
+    @PATCH("v1/spaces/{id}")
+    suspend fun patchSpace(@Path("id") id: String, @Body body: SpacePatchRequest): Space
+
     @POST("v1/jobs")
     suspend fun createJob(@Body body: JobCreateRequest): Job
 

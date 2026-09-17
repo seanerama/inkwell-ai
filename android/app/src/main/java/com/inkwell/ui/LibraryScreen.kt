@@ -69,6 +69,11 @@ fun LibraryScreen(
     onOpenCanvas: (String) -> Unit,
     modifier: Modifier = Modifier,
     loadThumbnail: (CanvasEntity) -> ImageBitmap? = { null },
+    /**
+     * Stage 15: hosts the space-settings sheet + "new space" dialog. Null (default) keeps the
+     * Stage-14 read-only tab bar — existing call sites/tests that omit it still compile.
+     */
+    settingsViewModel: SpaceSettingsViewModel? = null,
 ) {
     val config = LocalConfiguration.current
     val columns = if (config.screenWidthDp >= config.screenHeightDp) 4 else 2
@@ -88,6 +93,13 @@ fun LibraryScreen(
                     notSynced = viewModel.spacesNotSynced,
                     onSelect = { viewModel.selectSpace(it) },
                     onRefresh = { viewModel.refreshSpaces() },
+                    // Stage 15: long-press → Space settings; trailing "+" → new space.
+                    onEditSpace = { id ->
+                        viewModel.spaces.firstOrNull { it.id == id }?.let { space ->
+                            settingsViewModel?.openSettings(space, viewModel.spaces)
+                        }
+                    },
+                    onAddSpace = { settingsViewModel?.openCreate() },
                 )
             }
             BreadcrumbBar(viewModel = viewModel)
@@ -204,6 +216,17 @@ fun LibraryScreen(
             },
             onDismiss = { moveFor = null },
         )
+    }
+
+    // Stage 15: the space-settings sheet and the "new space" dialog (flag-gated; the host
+    // supplies the ViewModel only when SPACE_SETTINGS is on).
+    if (BuildConfig.SPACE_SETTINGS && settingsViewModel != null) {
+        settingsViewModel.editing?.let { space ->
+            SpaceSettingsSheet(space = space, viewModel = settingsViewModel)
+        }
+        if (settingsViewModel.creating) {
+            NewSpaceDialog(viewModel = settingsViewModel)
+        }
     }
 }
 

@@ -118,6 +118,16 @@ android {
             // AND release, because prod is not promoted, staging is the only environment. Flip
             // to "false" to restore the single-space behaviour without a code change.
             buildConfigField("boolean", "SPACES", "true")
+            // Space-settings kill-switch (Stage 15 feature flag, THIS stage's feature): ON adds
+            // on-device space editing — long-press a tab (or its menu) → Space settings (name,
+            // colour, model, system prompt) saved via PATCH /spaces/{id} and mirrored back, plus a
+            // trailing "+" tab that creates a new space (a new agent) via POST /spaces. OFF makes
+            // the Stage-14 tab bar read-only again: no long-press/menu, no "+" tab. Documented
+            // exception (same rationale as ONE_TAP_ASK/…/SPACES): default ON in debug AND release,
+            // because prod is not promoted, staging is the only environment, and the server routes
+            // are additionally gated by SPACES_EDITABLE (stage 13, default OFF → 403). Flip to
+            // "false" to restore the read-only tab bar without a code change.
+            buildConfigField("boolean", "SPACE_SETTINGS", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -155,6 +165,11 @@ android {
             // the stage-14 spec). Flip to "false" to restore the single seeded space (no tab
             // bar, "work"-slug send) without a code change.
             buildConfigField("boolean", "SPACES", "true")
+            // Stage 15 Space settings: ON in release by documented exception (see the debug
+            // block and the stage-15 spec). Flip to "false" to make the tab bar read-only again
+            // (no long-press/menu, no "+" tab) without a code change. The server routes are also
+            // gated by SPACES_EDITABLE (stage 13), so edits 403 unless the server enables them.
+            buildConfigField("boolean", "SPACE_SETTINGS", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

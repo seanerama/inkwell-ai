@@ -125,6 +125,8 @@ class CanvasViewModelSpacesTest {
         private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
         override suspend fun health() = HealthResponse("ok", "test", "device-api/v1")
         override suspend fun spaces() = serverSpaces
+        override suspend fun createSpace(body: com.inkwell.net.SpaceCreateRequest): Space = error("unused")
+        override suspend fun patchSpace(id: String, body: com.inkwell.net.SpacePatchRequest): Space = error("unused")
         override suspend fun createJob(body: JobCreateRequest): Job {
             submitted += body
             return job("job-${submitted.size}", body.type, "queued", null)

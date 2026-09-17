@@ -16,6 +16,20 @@ class DeviceRepository(private val api: DeviceApi) {
 
     suspend fun spaces(): List<Space> = apiCall { api.spaces() }
 
+    /**
+     * Stage 15: create a space (a new agent). HTTP failures surface as [ApiException] carrying
+     * the envelope code/message (e.g. `409 conflict` for a duplicate slug, `403 disabled` when
+     * `SPACES_EDITABLE` is off).
+     */
+    suspend fun createSpace(body: SpaceCreateRequest): Space = apiCall { api.createSpace(body) }
+
+    /**
+     * Stage 15: partial-update a space. The [body] carries only the changed fields (unchanged
+     * ones are null and omitted by `explicitNulls=false`). Errors surface as [ApiException]
+     * (`403 disabled`, `404 not_found`, `422 validation`).
+     */
+    suspend fun patchSpace(id: String, body: SpacePatchRequest): Space = apiCall { api.patchSpace(id, body) }
+
     suspend fun submitPing(): Job = apiCall { api.createJob(JobCreateRequest(type = "system.ping")) }
 
     /** Submit a pre-built `to_agent` job body (e.g. `canvas.annotate`). */
