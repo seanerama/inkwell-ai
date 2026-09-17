@@ -3,6 +3,7 @@
 inkwell token create --name <name>   # mint a token, print the plaintext once
 inkwell token revoke <id>            # revoke a token by id
 inkwell token list                   # list tokens (never prints the secret)
+inkwell token migrate-check          # exit 0 if all live tokens are on the newest pepper
 inkwell db seed                      # idempotently seed the four default spaces
 inkwell canary [--space work] [--timeout 90]  # run one live agent job (deploy gate)
 """
@@ -48,8 +49,38 @@ def _cmd_token_list(_: argparse.Namespace) -> int:
         rows = session.execute(select(DeviceToken).order_by(DeviceToken.created_at)).scalars().all()
     for r in rows:
         state = "revoked" if r.revoked_at else "active"
-        print(f"{r.id}  {r.name:20s}  {state}")
+        last_seen = r.last_seen_at.isoformat() if r.last_seen_at else "never"
+        print(f"{r.id}  {r.name:20s}  {state:8s}  v{r.hash_version}  last_seen={last_seen}")
     return 0
+
+
+def _cmd_token_migrate_check(_: argparse.Namespace) -> int:
+    """Exit 0 when no live token still lags the newest pepper generation, else 1.
+
+    ``target`` is MAX(hash_version) over ALL rows. A live (revoked_at IS NULL) token with
+    hash_version < target is a straggler that has not been seen since the pepper rotated;
+    while any exists the operator must NOT unset INKWELL_TOKEN_PEPPER_PREVIOUS. Zero
+    tokens, or all live tokens already at target, exit 0. The runbook runs this AFTER
+    using the tablet once, so at least one token has migrated and target has advanced.
+    """
+    from sqlalchemy import select
+
+    sm = get_sessionmaker()
+    with sm() as session:
+        rows = session.execute(select(DeviceToken)).scalars().all()
+    if not rows:
+        return 0
+    target = max(r.hash_version for r in rows)
+    laggers = [r for r in rows if r.revoked_at is None and r.hash_version < target]
+    if not laggers:
+        return 0
+    print(
+        f"{len(laggers)} live token(s) still on an older pepper generation (target v{target}):",
+        file=sys.stderr,
+    )
+    for r in laggers:
+        print(f"  {r.id}  {r.name}  v{r.hash_version}", file=sys.stderr)
+    return 1
 
 
 def _cmd_db_seed(_: argparse.Namespace) -> int:
@@ -80,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
     revoke.set_defaults(func=_cmd_token_revoke)
     listp = token_sub.add_parser("list", help="list tokens")
     listp.set_defaults(func=_cmd_token_list)
+    migrate_check = token_sub.add_parser(
+        "migrate-check",
+        help="exit 0 if no live token lags the newest pepper generation, else 1",
+    )
+    migrate_check.set_defaults(func=_cmd_token_migrate_check)
 
     db = sub.add_parser("db", help="database management")
     db_sub = db.add_subparsers(dest="action", required=True)

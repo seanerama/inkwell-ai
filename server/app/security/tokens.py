@@ -18,9 +18,13 @@ from app.config import get_settings
 from app.db.models import DeviceToken
 
 
-def hash_token(plaintext: str) -> str:
-    pepper = get_settings().token_pepper
+def _hash_with(pepper: str, plaintext: str) -> str:
+    """SHA-256 of ``<pepper>:<plaintext>``. Never log ``pepper`` or ``plaintext``."""
     return hashlib.sha256(f"{pepper}:{plaintext}".encode()).hexdigest()
+
+
+def hash_token(plaintext: str) -> str:
+    return _hash_with(get_settings().token_pepper, plaintext)
 
 
 def create_token(session: Session, name: str) -> tuple[DeviceToken, str]:
@@ -43,12 +47,41 @@ def revoke_token(session: Session, token_id: str) -> bool:
 
 
 def verify_token(session: Session, plaintext: str) -> DeviceToken | None:
-    """Return the active token row for ``plaintext``, or None if unknown/revoked."""
+    """Return the active token row for ``plaintext``, or None if unknown/revoked.
+
+    ADR-0008 dual-pepper grace window (Stage 18): look the token up by the current-pepper
+    hash first (a DB index equality, constant-time as today). On a miss, and only when
+    ``token_pepper_previous`` is set, look it up by the previous-pepper hash; if that row
+    is live, re-hash it to the current pepper in this same request and bump
+    ``hash_version``. A revoked row is never resurrected under either pepper.
+    """
+    settings = get_settings()
+
     row = session.execute(
-        select(DeviceToken).where(DeviceToken.token_hash == hash_token(plaintext))
+        select(DeviceToken).where(
+            DeviceToken.token_hash == _hash_with(settings.token_pepper, plaintext)
+        )
     ).scalar_one_or_none()
-    if row is None or row.revoked_at is not None:
-        return None
-    row.last_seen_at = datetime.now(UTC)
-    session.commit()
-    return row
+    if row is not None:
+        if row.revoked_at is not None:
+            return None
+        row.last_seen_at = datetime.now(UTC)
+        session.commit()
+        return row
+
+    previous = settings.token_pepper_previous
+    if previous:
+        row = session.execute(
+            select(DeviceToken).where(DeviceToken.token_hash == _hash_with(previous, plaintext))
+        ).scalar_one_or_none()
+        if row is not None:
+            if row.revoked_at is not None:
+                return None
+            # Migrate the row to the current pepper in this request.
+            row.token_hash = _hash_with(settings.token_pepper, plaintext)
+            row.hash_version = (row.hash_version or 1) + 1
+            row.last_seen_at = datetime.now(UTC)
+            session.commit()
+            return row
+
+    return None
