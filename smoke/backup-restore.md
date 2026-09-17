@@ -82,7 +82,7 @@ docker compose -p inkwell-restore-<ts> -f <printed-workdir>/compose.yml down -v
 | Check | Result |
 | --- | --- |
 | `GET /v1/health` ok (live) | pass (0.0.14) |
-| `backup.sh staging` exit 0, `latest` present, manifest written | pass (pre-deploy set via remote-deploy; latest → 20260917T170918Z-pre-deploy; nightly timer not yet installed — sudo step pending) |
+| `backup.sh staging` exit 0, `latest` present, manifest written | pass (pre-deploy set via remote-deploy; nightly-style run 20260917T235505Z as operator; timer enabled, first scheduled run 2026-09-18 03:32 UTC) |
 | No secret printed during backup | pass (2026-09-17, v0.0.14 pre-deploy set 20260917T170918Z-pre-deploy) |
 | `restore.sh` scratch: `health=ok` | pass — but only with `--into inkwell-restore-drill`; the default project name is rejected by Compose (stage 19) |
 | Restored `spaces` count == live `/v1/spaces` | pass (5 = 5) |
