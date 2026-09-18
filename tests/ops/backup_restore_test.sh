@@ -16,13 +16,28 @@ IMAGE_REF="inkwell-ai-server:ci"
 TMP="$(mktemp -d)"
 SRV="$TMP/srv"
 SRC_PROJECT="inkwellbkci$$"
-RESTORE_PROJECT="inkwellrestci$$"
 mkdir -p "$SRV/staging"
+
+# Tear a compose project down by label only (containers + network + volumes) — the same
+# shape restore.sh --teardown uses, and independent of any temp compose file.
+teardown_by_label() {
+  local p="$1"
+  docker ps -aq --filter "label=com.docker.compose.project=$p" | xargs -r docker rm -f >/dev/null 2>&1
+  docker network ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker network rm >/dev/null 2>&1
+  docker volume ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker volume rm -f >/dev/null 2>&1
+}
 
 cleanup() {
   set +e
   docker compose -p "$SRC_PROJECT" -f "$SRV/staging/compose.yml" --env-file "$SRV/staging/.env" down -v >/dev/null 2>&1
-  docker compose -p "$RESTORE_PROJECT" -f "$SRV/staging/compose.yml" --env-file "$SRV/staging/.env" down -v >/dev/null 2>&1
+  # The restore now uses the default scratch project name (inkwell-restore-<ts>); a failed
+  # assertion must not leak it. Discover any such scratch project from its deterministic
+  # volume names (<project>_<vol>) and remove it by label.
+  local proj
+  while read -r proj; do
+    [ -n "$proj" ] && teardown_by_label "$proj"
+  done < <(docker volume ls --format '{{.Name}}' 2>/dev/null \
+             | grep -E '^inkwell-restore-' | sed -E 's/_[^_]+$//' | sort -u)
   rm -rf "$TMP"
 }
 trap cleanup EXIT
@@ -90,9 +105,11 @@ SET_DIR="$SRV/backups/staging/latest"
 echo "== destroy the source stack (prove restore rebuilds from the set) =="
 dcsrc down -v
 
-echo "== restore.sh into a fresh project =="
+echo "== restore.sh via the DEFAULT project-name path (no --into) =="
+# Regression guard for stage 19: the default scratch project name must be a valid compose
+# project name. A restore with NO --into derives inkwell-restore-<ts> itself.
 OUT="$TMP/restore.out"
-INKWELL_SRV_DIR="$SRV" bash deploy/restore.sh "$SET_DIR" --into "$RESTORE_PROJECT" | tee "$OUT"
+INKWELL_SRV_DIR="$SRV" bash deploy/restore.sh "$SET_DIR" | tee "$OUT"
 
 echo "== assertions =="
 grep -q '^health=ok'               "$OUT" || fail "restored stack not healthy"
@@ -100,4 +117,12 @@ grep -qE 'rows: .*spaces=4( |$)'   "$OUT" || fail "expected 4 spaces after resto
 grep -qE 'rows: .*tokens=1( |$)'   "$OUT" || fail "expected 1 token after restore"
 grep -q 'blobs: files=1'           "$OUT" || fail "expected exactly 1 blob file after restore"
 
-echo "PASS: backup + restore round-trip reproduced 4 spaces, 1 token, 1 blob, health ok"
+RESTORE_PROJECT="$(grep -E '^project=' "$OUT" | head -n1 | cut -d= -f2-)"
+[ -n "$RESTORE_PROJECT" ] || fail "restore did not print a project= line"
+echo "$RESTORE_PROJECT" | grep -qE '^[a-z0-9][a-z0-9_-]*$' \
+  || fail "default project name '$RESTORE_PROJECT' is not a valid compose project name"
+
+echo "== tear down the scratch restore by label (restore.sh --teardown) =="
+INKWELL_SRV_DIR="$SRV" bash deploy/restore.sh --teardown "$RESTORE_PROJECT"
+
+echo "PASS: default-path backup + restore reproduced 4 spaces, 1 token, 1 blob, health ok; torn down by label"

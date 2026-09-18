@@ -64,6 +64,20 @@ deploy, and an optional encrypted off-host copy. All three run the same two scri
 
 # Restore OVER the live stack (destructive; takes a pre-restore backup first):
 /srv/inkwell/bin/restore.sh /srv/inkwell/backups/staging/<set> --into staging --yes
+
+# Tear down a scratch restore (the restore prints its own project name; use it here):
+/srv/inkwell/bin/restore.sh --teardown inkwell-restore-<ts>
+```
+
+A scratch restore is left running under the project name it prints (`project=…`,
+`inkwell-restore-<ts>` by default). Tear it down with the one command above, or by label
+if the script is not to hand — this removes containers, network, and volumes without the
+scratch's ephemeral compose file:
+
+```sh
+docker ps -aq     --filter label=com.docker.compose.project=<p> | xargs -r docker rm -f
+docker network ls -q --filter label=com.docker.compose.project=<p> | xargs -r docker network rm
+docker volume ls  -q --filter label=com.docker.compose.project=<p> | xargs -r docker volume rm -f
 ```
 
 Each set lives in `/srv/inkwell/backups/<env>/<UTC-timestamp>[-<label>]/` (mode 700) with
