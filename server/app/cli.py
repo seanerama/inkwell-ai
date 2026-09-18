@@ -159,6 +159,68 @@ def _cmd_canary(args: argparse.Namespace) -> int:
     return run_canary(space=args.space, timeout=args.timeout)
 
 
+def _load_space(session, slug: str):
+    from sqlalchemy import select
+
+    from app.db.models import Space
+
+    return session.execute(select(Space).where(Space.slug == slug)).scalar_one_or_none()
+
+
+def _read_file_bytes(path: str) -> bytes:
+    """Read the push payload from a path, or from stdin when ``path`` is ``-``."""
+    if path == "-":
+        return sys.stdin.buffer.read()
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _cmd_push_document(args: argparse.Namespace) -> int:
+    if not get_settings().push_enabled:
+        print("push disabled", file=sys.stderr)
+        return 2
+    from app.push.service import PushError, push_document
+
+    data = _read_file_bytes(args.file)
+    title = args.title or "Document"
+    sm = get_sessionmaker()
+    with sm() as session:
+        space = _load_space(session, args.space)
+        if space is None:
+            print(f"no space with slug {args.space}", file=sys.stderr)
+            return 1
+        try:
+            job, canvases = push_document(
+                session, space, data, mime=None, title=title, card_body=args.note
+            )
+        except PushError as exc:
+            print(f"push rejected: {exc}", file=sys.stderr)
+            return 1
+    print(f"job: {job.id}")
+    for canvas in canvases:
+        print(f"canvas: {canvas.id}")
+    return 0
+
+
+def _cmd_push_canvas(args: argparse.Namespace) -> int:
+    if not get_settings().push_enabled:
+        print("push disabled", file=sys.stderr)
+        return 2
+    from app.push.service import A4_H, A4_W, push_canvas
+
+    width, height = (A4_H, A4_W) if args.landscape else (A4_W, A4_H)
+    sm = get_sessionmaker()
+    with sm() as session:
+        space = _load_space(session, args.space)
+        if space is None:
+            print(f"no space with slug {args.space}", file=sys.stderr)
+            return 1
+        job, canvas = push_canvas(session, space, args.title, width, height, card_body=args.note)
+    print(f"job: {job.id}")
+    print(f"canvas: {canvas.id}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="inkwell")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -202,6 +264,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--timeout", type=float, default=90, help="seconds to wait for the worker (default: 90)"
     )
     canary.set_defaults(func=_cmd_canary)
+
+    push = sub.add_parser("push", help="push a document or blank canvas to a space (to_user)")
+    push_sub = push.add_subparsers(dest="action", required=True)
+    push_doc = push_sub.add_parser("document", help="push a PDF/PNG/JPEG as agent-origin canvases")
+    push_doc.add_argument("--space", required=True, help="target space slug")
+    push_doc.add_argument("--file", required=True, help="path to the file, or - for stdin")
+    push_doc.add_argument("--title", default=None, help="canvas/document title")
+    push_doc.add_argument("--note", default=None, help="optional answer-card body")
+    push_doc.set_defaults(func=_cmd_push_document)
+    push_canvas_p = push_sub.add_parser("canvas", help="push a blank agent-origin canvas")
+    push_canvas_p.add_argument("--space", required=True, help="target space slug")
+    push_canvas_p.add_argument("--title", required=True, help="canvas title")
+    push_canvas_p.add_argument(
+        "--landscape", action="store_true", help="landscape A4 (default portrait)"
+    )
+    push_canvas_p.add_argument("--note", default=None, help="optional answer-card body")
+    push_canvas_p.set_defaults(func=_cmd_push_canvas)
 
     return parser
 
