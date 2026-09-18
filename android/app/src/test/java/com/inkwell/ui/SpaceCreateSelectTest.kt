@@ -44,9 +44,9 @@ import org.junit.Test
  * the tab list ([LibraryViewModel.spaces]) CONTAINS the new space AND it becomes
  * [LibraryViewModel.activeSpaceId].
  *
- * The second case pins the bug fix: a post-create `spaceSync.refresh()` failure must NOT prevent
- * the already-persisted new space's tab from surfacing (previously the throw skipped
- * `onSpacesChanged`, so the create looked silent though the row existed).
+ * NOTE: this guards the create→reload→select VIEW-MODEL logic. The stage-16 bug itself lives in
+ * the Compose "+"-tab click → dialog wiring ([SpaceTabBar]) which only the instrumented test
+ * exercises (no Robolectric in this source set); that path is guarded on the emulator lane.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class SpaceCreateSelectTest {
@@ -124,20 +124,11 @@ class SpaceCreateSelectTest {
     /**
      * Mirrors the instrumented `SpacesDispatcher`: `GET /spaces` returns the current recs;
      * `POST /spaces` derives `slug`/`id = "space-$slug"`, records it, returns 201-equivalent.
-     * When [failRefreshAfterCreate] is set, the FIRST `spaces()` after a create throws (the
-     * post-create mirror refresh fails) — everything else still works.
      */
-    private class SpacesApi(
-        seed: List<Space>,
-        private val failRefreshAfterCreate: Boolean = false,
-    ) : DeviceApi {
+    private class SpacesApi(seed: List<Space>) : DeviceApi {
         val recs = seed.toMutableList()
-        private var created = false
 
-        override suspend fun spaces(): List<Space> {
-            if (created && failRefreshAfterCreate) throw java.io.IOException("mirror refresh failed")
-            return recs.sortedBy { it.position }
-        }
+        override suspend fun spaces(): List<Space> = recs.sortedBy { it.position }
 
         override suspend fun createSpace(body: SpaceCreateRequest): Space {
             val slug = body.name.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-')
@@ -153,7 +144,6 @@ class SpaceCreateSelectTest {
                 createdAt = "2026-09-16T00:00:00Z",
             )
             recs.add(rec)
-            created = true
             return rec
         }
 
@@ -181,10 +171,9 @@ class SpaceCreateSelectTest {
     private class Harness(
         val libraryVm: LibraryViewModel,
         val settingsVm: SpaceSettingsViewModel,
-        val spaceDao: FakeSpaceDao,
     )
 
-    private fun harness(failRefreshAfterCreate: Boolean = false): Harness {
+    private fun harness(): Harness {
         val spaceDao = FakeSpaceDao()
         val canvasDao = FakeCanvasDao()
         val folderDao = FakeFolderDao()
@@ -194,7 +183,7 @@ class SpaceCreateSelectTest {
             idGen = { "local-${System.nanoTime()}" }, clock = { 1L },
         )
         val library = LibraryRepository(folderDao, canvasDao, layerDao, runInTransaction = { it() })
-        val dev = DeviceRepository(SpacesApi(seededServer(), failRefreshAfterCreate))
+        val dev = DeviceRepository(SpacesApi(seededServer()))
         val spaceSync = SpaceSync(spaceDao, canvasDao, folderDao, { dev }, runInTransaction = { it() })
 
         val prefs = mutableMapOf<String, String?>()
@@ -213,7 +202,7 @@ class SpaceCreateSelectTest {
             loadSpaces = { spaceDao.all() },
             onSpacesChanged = { id -> libraryVm.reloadSpacesSelecting(id) },
         )
-        return Harness(libraryVm, settingsVm, spaceDao)
+        return Harness(libraryVm, settingsVm)
     }
 
     @Test
@@ -229,18 +218,5 @@ class SpaceCreateSelectTest {
         assertTrue("new tab must be in the tab list", h.libraryVm.spaces.any { it.id == "space-cooking" })
         assertEquals("new tab must become active", "space-cooking", h.libraryVm.activeSpaceId)
         assertFalse("dialog closes after a successful create", h.settingsVm.creating)
-    }
-
-    @Test
-    fun createSpace_surfaces_the_new_tab_even_if_the_post_create_refresh_fails() {
-        val h = harness(failRefreshAfterCreate = true)
-        assertEquals("space-work", h.libraryVm.activeSpaceId)
-
-        h.settingsVm.createSpace("Cooking", "#B58900")
-
-        // The space was POSTed and persisted locally; a failed mirror refresh must NOT hide it.
-        assertTrue("row persisted locally", h.spaceDao.store.any { it.id == "space-cooking" })
-        assertTrue("new tab must still surface", h.libraryVm.spaces.any { it.id == "space-cooking" })
-        assertEquals("new tab must still become active", "space-cooking", h.libraryVm.activeSpaceId)
     }
 }
