@@ -84,6 +84,52 @@ class CanvasOut(BaseModel):
     created_at: datetime
 
 
+class LayerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    canvas_id: uuid.UUID
+    z: int
+    owner: str
+    type: str
+    visible: bool
+    opacity: float
+    job_id: uuid.UUID | None
+    created_at: datetime
+
+
+class RasterOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    layer_id: uuid.UUID
+    blob_uri: str
+    mime: str
+    page: int | None
+    x_cu: float
+    y_cu: float
+    w_cu: float
+    h_cu: float
+    # Stage 21 additive field (ADR-0012): a fresh signed GET /blobs/{key} link (24 h).
+    # Not stored — computed on read/push so a device can fetch the bytes without signing.
+    url: str | None = None
+
+
+class CanvasDetailOut(CanvasOut):
+    """``GET /canvases/{id}`` — Canvas plus its layers and rasters (frozen shape)."""
+
+    layers: list[LayerOut] = []
+    rasters: list[RasterOut] = []
+
+
+class BlobOut(BaseModel):
+    """``POST /blobs`` → ``{ key, url, expires_at }`` (frozen shape)."""
+
+    key: str
+    url: str
+    expires_at: datetime
+
+
 class CardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

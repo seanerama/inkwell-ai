@@ -23,7 +23,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${0}")/../.." && pwd)"
 
 # Key-name prefixes that MUST be passed through to the api/worker containers.
-CONTAINER_PREFIXES=("INKWELL_" "AGENT_" "SPACES_")
+CONTAINER_PREFIXES=("INKWELL_" "AGENT_" "SPACES_" "PUSH_")
 # Prefixed keys that are intentionally NOT container env (none today; documents intent).
 ALLOWLIST=("IMAGE_REF" "API_PORT" "POSTGRES_PASSWORD" "DATABASE_URL")
 
@@ -87,7 +87,7 @@ main() {
     echo "FAIL: an env key never reaches the containers (add it to the compose app-env anchor)" >&2
     return 1
   fi
-  echo "ok: every INKWELL_/AGENT_/SPACES_ key in .env.example is referenced in compose.yml"
+  echo "ok: every INKWELL_/AGENT_/SPACES_/PUSH_ key in .env.example is referenced in compose.yml"
 
   # --- test the test: a fixture with a deliberately missing key MUST fail parity ---
   echo "== self-check: the parity logic must catch a missing key =="

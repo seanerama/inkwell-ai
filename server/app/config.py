@@ -69,6 +69,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SPACES_EDITABLE", "INKWELL_SPACES_EDITABLE"),
     )
 
+    # Stage 21 kill-switch (default OFF). When false, `inkwell push` exits 2 with
+    # "push disabled" and the blob routes (POST /blobs, GET /blobs/{key}) return 403
+    # with error.code="disabled". Gates the whole server-side push surface (ADR-0012).
+    # Accepts a bare ``PUSH_ENABLED`` in addition to the ``INKWELL_``-prefixed form.
+    push_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("PUSH_ENABLED", "INKWELL_PUSH_ENABLED"),
+    )
+
     env: str = "dev"
 
     # NOTE: ANTHROPIC_API_KEY is intentionally NOT a field here. The anthropic SDK

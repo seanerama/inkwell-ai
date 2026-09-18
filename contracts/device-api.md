@@ -210,3 +210,57 @@ validation` with message "slug is immutable". Unknown `id` → `404 not_found`.
 | `404` | `not_found` | `PATCH` on an unknown space id |
 | `409` | `conflict` | `POST` with a slug that already exists |
 | `422` | `validation` | bad field (colour, slug pattern, overlong prompt, name length), a derived-empty slug, or `slug` present in a `PATCH` |
+
+### Stage 21 additions — 2026-09-18
+
+Stage 21 implements the three blob/canvas routes the **frozen route table above already
+lists** (`POST /blobs`, `GET /blobs/{key}`, `GET /canvases/{id}`) and the server-side
+`to_user` push (`agent.push_document`, `agent.push_canvas`). Nothing frozen changes —
+the route table, entity shapes, the `to_user` result shape, and the error envelope are
+untouched. This section documents only the additive detail: the upload limits, the
+additive `url` on rasters, the additive `canvases` sibling on multi-page results, and the
+error codes those routes surface (ADR-0012).
+
+**Kill-switch.** `POST /blobs` and `GET /blobs/{key}` are additionally gated by the
+server-side `PUSH_ENABLED` env (default OFF). When off, both return `403` with
+`error.code = "disabled"`. `GET /canvases/{id}` is never gated (bearer only). The
+operator CLI `inkwell push …` is gated the same way (exit 2, "push disabled").
+
+**`POST /blobs`** (multipart `file`) → `201 { key, url, expires_at }`.
+- Size cap **20 MB**; over it → `413 { error.code: "too_large" }`.
+- Mime allow-list **`application/pdf`, `image/png`, `image/jpeg`**, decided by
+  **sniffing the leading magic bytes** — the declared/uploaded content-type is never
+  trusted. A non-allow-listed file → `415 { error.code: "unsupported_media_type" }`.
+- `key` is `push/<uuid>.<ext>`; `url` is a signed, expiring `GET /blobs/{key}` link
+  (24 h TTL); `expires_at` is the RFC 3339 expiry.
+
+**`GET /blobs/{key}?sig=&exp=`** → the stored bytes. Requires the bearer token **and** a
+valid HMAC signature (ADR-0004). The `Content-Type` is inferred from the key extension
+(the store does not persist the mime); the response sets
+`Cache-Control: private, max-age=<remaining ttl>`.
+- Missing/invalid/expired signature → `403 { error.code: "forbidden" }` (checked before
+  any key lookup, so a bad signature cannot probe which keys exist).
+- Unknown key (valid signature) → `404 { error.code: "not_found" }`.
+- Missing bearer token → `401` even when the signature is valid.
+
+**`GET /canvases/{id}`** → `Canvas & { layers: Layer[], rasters: Raster[] }` (the frozen
+shape; never strokes). `404 { error.code: "not_found" }` for an unknown id. Each
+`Raster` carries the additive field **`url`** — a fresh signed `GET /blobs/{key}` link
+(24 h) — alongside its stored `mime`/`page`, so a device that missed the sync window can
+re-fetch without signing anything.
+
+**`Raster.url` (additive).** The `Raster` entity gains an optional `url` string. It is
+**computed on read**, never stored (there is no schema/migration change). It appears on
+`GET /canvases/{id}` rasters and on the `rasters[]` of a `to_user` job `result`.
+
+**`result.canvases[]` (additive sibling) on `to_user` documents.** A multi-page
+`agent.push_document` produces one `origin=agent` canvas per page (each with a `raster`
+layer at `z=-1` pointing at the same blob key with its `page`), so the result carries a
+`canvases: Canvas[]` sibling **alongside** the frozen `canvas` (which stays the first
+page). A single-page push's result is therefore **exactly the frozen
+`{ canvas, layers, rasters, cards }`** plus that one-element `canvases` sibling. Page
+canvases are titled `"<title>"` (single page) or `"<title> — p<N>"` (multi-page); the
+raster is fitted to the canvas width and placed at the top-left, portrait pages on an A4
+canvas and landscape pages on the same-area swap (ADR-0012). `agent.push_canvas` writes a
+blank agent-origin canvas only (`layers: []`, `rasters: []`) — the device creates the
+`user/ink` layer on the first stroke.
