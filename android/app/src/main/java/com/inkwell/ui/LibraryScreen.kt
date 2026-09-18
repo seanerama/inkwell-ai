@@ -2,6 +2,7 @@ package com.inkwell.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -100,6 +102,8 @@ fun LibraryScreen(
                         }
                     },
                     onAddSpace = { settingsViewModel?.openCreate() },
+                    // Stage 22: unread pushed-canvas badge per tab.
+                    unseenBySpace = viewModel.unseenBySpace,
                 )
             }
             BreadcrumbBar(viewModel = viewModel)
@@ -132,7 +136,10 @@ fun LibraryScreen(
                         CanvasTile(
                             canvas = canvas,
                             thumbnail = thumb,
-                            onOpen = { onOpenCanvas(canvas.id) },
+                            // Stage 22: a "New" dot on an unread pushed canvas; opening it marks
+                            // it seen (clears the dot and the tab badge).
+                            isNew = canvas.id in viewModel.unseenCanvasIds,
+                            onOpen = { viewModel.markSeen(canvas.id); onOpenCanvas(canvas.id) },
                             onRename = { renameFor = TileRef(false, canvas.id, canvas.title) },
                             onMove = { moveFor = TileRef(false, canvas.id, canvas.title) },
                             onDelete = { viewModel.deleteCanvas(canvas.id) },
@@ -321,6 +328,7 @@ private fun CanvasTile(
     onRename: () -> Unit,
     onMove: () -> Unit,
     onDelete: () -> Unit,
+    isNew: Boolean = false,
 ) {
     var menu by remember { mutableStateOf(false) }
     Surface(
@@ -349,12 +357,23 @@ private fun CanvasTile(
                     Text("✎", color = Color(0xFFBBBBBB))
                 }
             }
-            Text(
-                canvas.title.ifBlank { "Untitled" },
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                modifier = Modifier.padding(top = 4.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                // Stage 22: a "New" dot marks an unread pushed canvas until it is opened.
+                if (isNew) {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 6.dp)
+                            .size(8.dp)
+                            .background(Color(0xFF1B6EF3), CircleShape)
+                            .testTag(LibraryTags.newDot(canvas.id)),
+                    )
+                }
+                Text(
+                    canvas.title.ifBlank { "Untitled" },
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
             Text(relativeDate(canvas.updatedAt), color = Color(0xFF757575))
         }
         ItemMenu(
@@ -565,6 +584,9 @@ object LibraryTags {
 
     fun folderTile(id: String) = "library_folder_$id"
     fun canvasTile(id: String) = "library_canvas_$id"
+
+    /** Stage 22: the "New" (unread pushed canvas) dot on a tile. */
+    fun newDot(id: String) = "library_new_$id"
     fun moveTarget(id: String) = "library_move_target_$id"
 
     /** Stage 14: a "move to another space" target in the Move… dialog. */

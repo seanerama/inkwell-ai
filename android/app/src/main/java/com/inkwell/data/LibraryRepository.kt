@@ -188,6 +188,36 @@ class LibraryRepository(
         }
     }
 
+    // --- Stage 22: pushed-canvas unread markers (contract `ink-storage` v4, `seen_at`) ---
+
+    /**
+     * The number of UNREAD pushed canvases in a space: agent-origin, live (not trashed), with
+     * `seen_at == null`. Drives the tab badge (SPEC §9.3). Reuses [allForSpace] + a Kotlin
+     * filter so no new DAO query / schema is needed beyond the additive `seen_at` column.
+     */
+    suspend fun unseenPushedCount(spaceId: String): Int =
+        canvasDao.allForSpace(spaceId).count {
+            it.origin == "agent" && it.deletedAt == null && it.seenAt == null
+        }
+
+    /** The ids of a space's unread pushed canvases (for the tile "New" dot). */
+    suspend fun unseenCanvasIds(spaceId: String): Set<String> =
+        canvasDao.allForSpace(spaceId)
+            .filter { it.origin == "agent" && it.deletedAt == null && it.seenAt == null }
+            .map { it.id }
+            .toSet()
+
+    /**
+     * Mark a canvas seen (opened): stamp `seen_at` the first time it is opened so its badge /
+     * "New" dot clears. A no-op for an already-seen or missing canvas. Uses byId + upsert (no
+     * new DAO query); `updated_at` is left alone so opening a canvas does not reorder the grid.
+     */
+    suspend fun markSeen(canvasId: String) {
+        val canvas = canvasDao.byId(canvasId) ?: return
+        if (canvas.seenAt != null) return
+        canvasDao.upsert(canvas.copy(seenAt = clock()))
+    }
+
     /** Rename a canvas (bumps `updated_at`). */
     suspend fun renameCanvas(id: String, title: String) = canvasDao.rename(id, title, clock())
 

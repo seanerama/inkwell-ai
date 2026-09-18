@@ -107,6 +107,14 @@ class MainActivity : ComponentActivity() {
                     autoOpenDefault = !BuildConfig.LIBRARY,
                     // Stage 14: post with the canvas's own space id; reconcile on send.
                     spaceSync = spaceSync,
+                    // Stage 22: load a pushed canvas's raster (PDF page / image) for on-screen
+                    // rendering beneath ink and for the composited export. Null when the flag is
+                    // OFF so the raster code stays inert.
+                    pushedRasterSource = if (BuildConfig.PUSH_INBOX) {
+                        com.inkwell.render.PushedRasterSource(db.layerDao(), db.rasterDao())
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -140,6 +148,25 @@ class MainActivity : ComponentActivity() {
         )
         // Stage 14: the active-space tab is remembered in the same plain prefs as the job type.
         val prefs = applicationContext.getSharedPreferences("inkwell_prefs", Context.MODE_PRIVATE)
+        val tokenStore = EncryptedTokenStore(applicationContext)
+        // Stage 22: the push inbox materialises host-pushed `to_user` jobs discovered via the
+        // persisted `/sync` cursor. Wired only when the kill-switch is ON.
+        val pushInbox = if (BuildConfig.PUSH_INBOX) {
+            com.inkwell.net.PushInbox(
+                store = com.inkwell.data.RoomPushedCanvasStore(
+                    canvasDao = db.canvasDao(),
+                    layerDao = db.layerDao(),
+                    folderDao = db.folderDao(),
+                    rasterDao = db.rasterDao(),
+                ),
+                downloader = com.inkwell.net.CachingBlobDownloader(
+                    repoProvider = { LoopServices.repositoryFrom(tokenStore) },
+                    cacheDir = applicationContext.cacheDir,
+                ),
+            )
+        } else {
+            null
+        }
         viewModelFactory {
             initializer {
                 LibraryViewModel(
@@ -148,6 +175,14 @@ class MainActivity : ComponentActivity() {
                     spaceSync = spaceSync,
                     loadActiveSpaceId = { prefs.getString("active_space_id", null) },
                     saveActiveSpaceId = { prefs.edit().putString("active_space_id", it).apply() },
+                    // Stage 22: push-inbox discovery collaborators (null when the flag is OFF).
+                    pushInbox = pushInbox,
+                    syncCursorStore = if (BuildConfig.PUSH_INBOX) {
+                        com.inkwell.net.PrefsSyncCursorStore(applicationContext)
+                    } else {
+                        null
+                    },
+                    deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
                 )
             }
         }

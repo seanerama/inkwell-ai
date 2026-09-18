@@ -88,6 +88,8 @@ class SpaceSyncTest {
         override suspend fun sync(cursor: String?): SyncResponse = error("unused")
         override suspend fun patchCard(id: String, body: CardStateRequest): CardResponse = error("unused")
         override suspend fun runCardAction(id: String, actionId: String): CardResponse = error("unused")
+        override suspend fun getCanvas(id: String) = error("unused")
+        override suspend fun downloadBlob(url: String) = error("unused")
     }
 
     private fun space(id: String, slug: String, position: Int = 0) = Space(

@@ -14,6 +14,10 @@ import com.inkwell.data.FolderEntity
 import com.inkwell.data.LibraryRepository
 import com.inkwell.data.SpaceEntity
 import com.inkwell.data.SpaceSync
+import com.inkwell.net.DeviceRepository
+import com.inkwell.net.PushInbox
+import com.inkwell.net.SyncCursorStore
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -40,7 +44,24 @@ class LibraryViewModel(
     private val saveActiveSpaceId: (String) -> Unit = {},
     /** Stage 14 kill-switch; OFF restores the single-seeded-space Library. [BuildConfig.SPACES]. */
     private val spacesEnabled: Boolean = BuildConfig.SPACES,
+    // --- Stage 22: push-inbox discovery of host-pushed `to_user` jobs (ADR-0012) ---
+    /** Materialises discovered pushed jobs; null in lightweight tests / when unwired. */
+    private val pushInbox: PushInbox? = null,
+    /** Persists the `/sync` cursor across restarts; null in lightweight tests. */
+    private val syncCursorStore: SyncCursorStore? = null,
+    /** The paired device repository provider (null when unpaired), for the poll. */
+    private val deviceRepositoryProvider: () -> DeviceRepository? = { null },
+    /** Stage 22 kill-switch. OFF = no `to_user` polling, no badges. [BuildConfig.PUSH_INBOX]. */
+    private val pushInboxEnabled: Boolean = BuildConfig.PUSH_INBOX,
 ) : ViewModel() {
+
+    /** Stage 22: unread pushed-canvas count per space id (drives the tab badge, SPEC §9.3). */
+    var unseenBySpace by mutableStateOf<Map<String, Int>>(emptyMap())
+        private set
+
+    /** Stage 22: ids of unread pushed canvases in the current space (drives the tile "New" dot). */
+    var unseenCanvasIds by mutableStateOf<Set<String>>(emptySet())
+        private set
 
     var ready by mutableStateOf(false)
         private set
@@ -106,6 +127,66 @@ class LibraryViewModel(
             library.purgeExpiredTrash() // purge Trash > 30 days on app start
             refresh()
             ready = true
+            // Stage 22: discover any pushed jobs waiting, then show badges.
+            pollPushInboxSuspending()
+            loadBadges()
+        }
+        // Stage 22: foreground push-inbox poll loop (60 s cadence, SPEC §8) when wired + ON.
+        if (pushInboxEnabled && pushInbox != null) {
+            viewModelScope.launch {
+                while (true) {
+                    delay(FOREGROUND_POLL_MS)
+                    pollPushInboxSuspending()
+                    loadBadges()
+                }
+            }
+        }
+    }
+
+    /**
+     * Stage 22: one push-inbox discovery pass (seed the cursor on first run; materialise
+     * newly-pushed `to_user` jobs; advance the cursor only on success). Non-fatal — an
+     * offline/unpaired failure keeps the cached state. A no-op when the flag is OFF/unwired.
+     * When something was materialised, the Library grid is refreshed so it appears at once.
+     */
+    private suspend fun pollPushInboxSuspending() {
+        if (!pushInboxEnabled) return
+        val inbox = pushInbox ?: return
+        val cursorStore = syncCursorStore ?: return
+        val repo = deviceRepositoryProvider() ?: return
+        try {
+            val materialised = inbox.poll(repo, cursorStore)
+            if (materialised > 0) refresh()
+        } catch (_: Exception) {
+            // Offline / unpaired / HTTP error: keep the cached state; the next poll retries.
+        }
+    }
+
+    /** Public trigger (pull-to-refresh, tab select): poll the push inbox then reload badges. */
+    fun pollPushInbox() {
+        if (!pushInboxEnabled) return
+        viewModelScope.launch {
+            pollPushInboxSuspending()
+            loadBadges()
+        }
+    }
+
+    /** Recompute the per-space badge counts and the current space's "New" tile ids. */
+    private suspend fun loadBadges() {
+        if (!pushInboxEnabled) return
+        val counts = mutableMapOf<String, Int>()
+        for (s in spaces) counts[s.id] = library.unseenPushedCount(s.id)
+        unseenBySpace = counts
+        val sid = spaceId
+        unseenCanvasIds = if (sid != null) library.unseenCanvasIds(sid) else emptySet()
+    }
+
+    /** Stage 22: mark a pushed canvas seen (opening it clears its badge / "New" dot). */
+    fun markSeen(canvasId: String) {
+        if (!pushInboxEnabled) return
+        viewModelScope.launch {
+            library.markSeen(canvasId)
+            loadBadges()
         }
     }
 
@@ -229,13 +310,19 @@ class LibraryViewModel(
         folderId = null
         showTrash = false
         reload()
+        viewModelScope.launch { loadBadges() } // Stage 22: re-scope the "New" tile dots.
     }
 
     /** Pull-to-refresh trigger: re-mirror the server's spaces and reconcile, then reload. */
     fun refreshSpaces() {
-        if (!spacesEnabled) return
+        if (!spacesEnabled) {
+            pollPushInbox() // Stage 22: still discover pushed jobs when Spaces is off.
+            return
+        }
         viewModelScope.launch {
             val ok = tryRefreshSpaces()
+            // Stage 22: pull-to-refresh also discovers host-pushed jobs (SPEC §8).
+            pollPushInboxSuspending()
             loadSpaces()
             spacesNotSynced = !ok && spaces.size <= 1
             // Reconciliation may have repointed the active space onto a server id; remap.
@@ -250,6 +337,7 @@ class LibraryViewModel(
                 showTrash = false
             }
             refresh()
+            loadBadges() // Stage 22: refresh badges after a mirror/materialise pass.
         }
     }
 
@@ -314,5 +402,10 @@ class LibraryViewModel(
 
     fun purgeFolderForever(id: String) {
         viewModelScope.launch { library.purgeFolder(id); reloadTrash() }
+    }
+
+    companion object {
+        /** Foreground push-inbox poll cadence (SPEC §8: 60 s when nothing is outstanding). */
+        const val FOREGROUND_POLL_MS = 60_000L
     }
 }

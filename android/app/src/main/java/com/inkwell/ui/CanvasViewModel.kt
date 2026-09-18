@@ -97,13 +97,22 @@ class CanvasViewModel(
     private val cardStatePersistence: CardStatePersistence? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
     /** The canvas exporter (contract coordinate-mapping); injectable so `send()` is JVM-testable. */
-    private val exporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result = CanvasExporter::export,
+    private val exporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result =
+        { w, h, layers -> CanvasExporter.export(w, h, layers) },
     /**
      * Stage 11: when true (the flag-OFF / legacy path) the ViewModel opens the default
      * canvas on creation. With the Library ([BuildConfig.LIBRARY]) on, MainActivity drives
      * [openCanvas] for a chosen tile instead, so this is set false to avoid a wasted load.
      */
     private val autoOpenDefault: Boolean = true,
+    /**
+     * Stage 22: loads a pushed canvas's raster layer for on-screen rendering and pre-send
+     * export (a PDF page / image beneath ink). Null in lightweight tests and when a canvas
+     * has no raster (an ordinary user canvas) — then nothing raster-related runs. Gated at
+     * the app wiring by `BuildConfig.PUSH_INBOX`, so OFF leaves this null and the render/
+     * export code inert.
+     */
+    private val pushedRasterSource: com.inkwell.render.PushedRasterSource? = null,
 ) : ViewModel() {
 
     var tool by mutableStateOf("pen")
@@ -186,6 +195,17 @@ class CanvasViewModel(
 
     /** Agent-layer visibility toggled from the layer tray. */
     var agentLayerVisible by mutableStateOf(true)
+        private set
+
+    /**
+     * Stage 22: the pushed raster (a PDF page / image) rendered BENEATH ink on this canvas,
+     * or null when the canvas has none. Loaded in [applyState] via [pushedRasterSource].
+     */
+    var canvasRaster by mutableStateOf<com.inkwell.render.RasterRenderer.RasterSpec?>(null)
+        private set
+
+    /** Stage 22: "Document" (raster) layer visibility, toggled from the layer tray. */
+    var documentVisible by mutableStateOf(true)
         private set
 
     /** Whether the minimal layer tray is expanded. */
@@ -300,6 +320,17 @@ class CanvasViewModel(
             panel = redraw.panel
             pendingRedraw = null
         }
+        // Stage 22: load the pushed raster (if any) for this canvas so it renders beneath ink.
+        canvasRaster = null
+        documentVisible = true
+        val src = pushedRasterSource
+        val cid = state.canvasId
+        if (src != null) {
+            viewModelScope.launch {
+                canvasRaster = src.specFor(cid)
+                refreshLayerRows()
+            }
+        }
         refreshLayerRows()
         ready = true
     }
@@ -313,6 +344,7 @@ class CanvasViewModel(
         ready = false
         panel = null
         agentAnnotations = emptyList()
+        canvasRaster = null
         viewModelScope.launch {
             repository.openCanvas(canvasId)?.let { applyState(it) }
         }
@@ -492,6 +524,12 @@ class CanvasViewModel(
         refreshLayerRows()
     }
 
+    /** Stage 22 layer-tray: toggle the "Document" (raster) layer's visibility. */
+    fun toggleDocumentLayer() {
+        documentVisible = !documentVisible
+        refreshLayerRows()
+    }
+
     fun toggleLayerTray() { showLayerTray = !showLayerTray }
 
     /**
@@ -535,10 +573,18 @@ class CanvasViewModel(
         instruction = ""
 
         viewModelScope.launch {
-            // 1–2. Export the PNG (contract coordinate-mapping), off the main thread.
+            // 1–2. Export the PNG (contract coordinate-mapping), off the main thread. Stage 22:
+            // a pushed canvas composites its raster BENEATH ink (SPEC §5.2) so the agent sees
+            // the document with the marks together; an ordinary canvas has no rasters and takes
+            // the injected [exporter] path unchanged.
             val exportLayers = listOf(ExportLayer(z = 0, visible = true, strokes = strokes.toList()))
             val result = withContext(ioDispatcher) {
-                exporter(canvasWidth, canvasHeight, exportLayers)
+                val exportRasters = pushedRasterSource?.exportRastersFor(cId) ?: emptyList()
+                if (exportRasters.isEmpty()) {
+                    exporter(canvasWidth, canvasHeight, exportLayers)
+                } else {
+                    CanvasExporter.export(canvasWidth, canvasHeight, exportLayers, exportRasters)
+                }
             }
             val (png, export) = when (result) {
                 is CanvasExporter.Result.Success -> result.png to result.export
@@ -804,10 +850,15 @@ class CanvasViewModel(
         val cId = canvasId
         viewModelScope.launch {
             val rows = mutableListOf<LayerRow>()
+            // Stage 22: a raster ("Document") layer sits BENEATH ink, so list it first.
+            if (canvasRaster != null) {
+                rows += LayerRow(id = "document", label = "Document", owner = "document", visible = documentVisible)
+            }
             rows += LayerRow(id = inkLayerId ?: "ink", label = "Ink", owner = "user", visible = true)
             if (layerRepo != null && cId != null) {
                 layerRepo.layersFor(cId)
-                    .filter { it.owner == "agent" }
+                    // Stage 22: raster layers are surfaced as the "Document" row above, not here.
+                    .filter { it.owner == "agent" && it.type != "raster" }
                     .forEach { l ->
                         rows += LayerRow(
                             id = l.id,

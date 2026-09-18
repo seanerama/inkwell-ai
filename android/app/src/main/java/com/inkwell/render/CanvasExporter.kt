@@ -3,6 +3,7 @@ package com.inkwell.render
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.RectF
 import java.io.ByteArrayOutputStream
 
 /**
@@ -15,6 +16,20 @@ data class ExportLayer(
     val z: Int,
     val visible: Boolean,
     val strokes: List<RenderStroke>,
+)
+
+/**
+ * Stage 22: a pushed raster (a pre-rasterised PDF page or image [bitmap]) to composite into
+ * the export at its [placement] (canvas units) and stacking order [z]. Raster layers carry
+ * `z < 0` so [ExportComposition.ordered] draws them BENEATH ink (SPEC §5.2), letting the
+ * agent see the document with the marks on top. The [bitmap] is produced by
+ * [RasterBitmaps.render]; the exporter only scales it into the export rect.
+ */
+data class ExportRaster(
+    val z: Int,
+    val visible: Boolean,
+    val bitmap: Bitmap,
+    val placement: RasterFit.Placement,
 )
 
 /**
@@ -73,9 +88,10 @@ object CanvasExporter {
         widthCu: Int,
         heightCu: Int,
         layers: List<ExportLayer>,
+        rasters: List<ExportRaster> = emptyList(),
     ): Result {
         val export = CoordinateMapping.export(widthCu, heightCu)
-        val bitmap = render(widthCu, heightCu, export, layers)
+        val bitmap = render(widthCu, heightCu, export, layers, rasters)
         try {
             val first = encode(bitmap)
             if (first.size <= MAX_PNG_BYTES) {
@@ -109,6 +125,7 @@ object CanvasExporter {
         heightCu: Int,
         export: CoordinateMapping.Export,
         layers: List<ExportLayer>,
+        rasters: List<ExportRaster>,
     ): Bitmap {
         val bmp = Bitmap.createBitmap(export.w, export.h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
@@ -121,15 +138,40 @@ object CanvasExporter {
             minScale = 0f
             maxScale = Float.MAX_VALUE
         }
+        val rasterPaint = android.graphics.Paint(
+            android.graphics.Paint.FILTER_BITMAP_FLAG or android.graphics.Paint.ANTI_ALIAS_FLAG,
+        )
+        val dst = RectF()
 
-        for (layer in layers.filter { it.visible }.sortedBy { it.z }) {
-            val renderer = LayerRenderer()
-            renderer.setCanvasSize(widthCu, heightCu)
-            renderer.setCommittedStrokes(layer.strokes)
-            renderer.draw(canvas, transform)
-            renderer.release()
+        // Draw raster layers (z<0) and ink layers (z>=0) in one ascending-z pass so rasters
+        // land BENEATH ink (SPEC §5.2). The ordering is the JVM-tested ExportComposition rule.
+        val ops = buildList {
+            layers.filter { it.visible }.forEach { add(DrawOp.Ink(it.z, it)) }
+            rasters.filter { it.visible }.forEach { add(DrawOp.Raster(it.z, it)) }
+        }
+        for (op in ExportComposition.ordered(ops)) {
+            when (op) {
+                is DrawOp.Ink -> {
+                    val renderer = LayerRenderer()
+                    renderer.setCanvasSize(widthCu, heightCu)
+                    renderer.setCommittedStrokes(op.layer.strokes)
+                    renderer.draw(canvas, transform)
+                    renderer.release()
+                }
+                is DrawOp.Raster -> {
+                    val rect = RasterFit.destRectPx(op.raster.placement, scale, 0f, 0f)
+                    dst.set(rect.left, rect.top, rect.right, rect.bottom)
+                    canvas.drawBitmap(op.raster.bitmap, null, dst, rasterPaint)
+                }
+            }
         }
         return bmp
+    }
+
+    /** The two kinds of drawable, ordered by `z` via [ExportComposition] (raster below ink). */
+    private sealed interface DrawOp : ExportComposition.Ordered {
+        data class Ink(override val z: Int, val layer: ExportLayer) : DrawOp
+        data class Raster(override val z: Int, val raster: ExportRaster) : DrawOp
     }
 
     private fun encode(bmp: Bitmap): ByteArray {

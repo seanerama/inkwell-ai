@@ -140,6 +140,8 @@ class CanvasViewModelSpacesTest {
         }
         override suspend fun patchCard(id: String, body: CardStateRequest): CardResponse = error("unused")
         override suspend fun runCardAction(id: String, actionId: String): CardResponse = error("unused")
+        override suspend fun getCanvas(id: String) = error("unused")
+        override suspend fun downloadBlob(url: String) = error("unused")
         private fun job(id: String, type: String, status: String, result: kotlinx.serialization.json.JsonObject?) = Job(
             id = id, spaceId = "space-work", canvasId = "canvas-1", direction = "to_agent", type = type,
             status = status, result = result, createdAt = "2026-09-16T00:00:00Z", updatedAt = "2026-09-16T00:00:01Z",
