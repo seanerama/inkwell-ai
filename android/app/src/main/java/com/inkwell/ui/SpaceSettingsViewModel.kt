@@ -239,7 +239,16 @@ class SpaceSettingsViewModel(
             try {
                 val created = dev.createSpace(SpaceCreateRequest(name = trimmed, color = color))
                 upsertSpace(created.toEntity())
-                spaceSync?.refresh()
+                // Stage 16: the created row is already persisted locally, so the new tab must
+                // surface regardless of the follow-up mirror. `refresh()` is a best-effort
+                // reconcile (server round-trip + Room transaction); if it throws it must NOT
+                // skip `onSpacesChanged` (which surfaces + selects the tab) — otherwise a
+                // create looks like it silently failed even though the space exists.
+                try {
+                    spaceSync?.refresh()
+                } catch (_: Throwable) {
+                    // best-effort: the next pull-to-refresh reconciles it
+                }
                 createSaving = false
                 creating = false
                 onSpacesChanged(created.id)

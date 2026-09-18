@@ -1,7 +1,9 @@
 package com.inkwell
 
+import androidx.compose.ui.test.ComposeTimeoutException
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.junit4.ComposeContentTestRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -190,6 +192,28 @@ class SpaceSettingsInstrumentedTest {
         onSpacesChanged = { id -> libraryVm.reloadSpacesSelecting(id) },
     )
 
+    /**
+     * Wait for a node with [tag] to exist, rethrowing a timeout with [because] so the failure
+     * report names the stalled step. compose-ui-test 1.6.8 has no `waitUntil(conditionDescription,…)`
+     * overload, so this wrapper supplies the per-wait message the diagnosis needs.
+     */
+    private fun ComposeContentTestRule.awaitTag(
+        tag: String,
+        because: String,
+        timeoutMillis: Long = 5_000,
+    ) {
+        try {
+            waitUntil(timeoutMillis) {
+                onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty()
+            }
+        } catch (e: ComposeTimeoutException) {
+            throw AssertionError(
+                "stage-16: timed out after ${timeoutMillis}ms — $because (waiting for tag=$tag)",
+                e,
+            )
+        }
+    }
+
     @Test
     fun prompt_patch_sends_only_the_changed_field_and_the_mirror_updates() = runBlocking {
         spaceSync.refresh()
@@ -225,22 +249,24 @@ class SpaceSettingsInstrumentedTest {
             LibraryScreen(viewModel = libraryVm, onOpenCanvas = {}, settingsViewModel = settingsVm)
         }
 
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag(SpaceTabTags.tab("space-business"))
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        // Stage 16: each wait carries a distinct message so a ComposeTimeoutException names
+        // WHICH step stalled (compose-ui-test 1.6.8 has no waitUntil(description,…) overload).
+        composeRule.awaitTag(
+            SpaceTabTags.tab("space-business"),
+            because = "initial spaces mirror did not surface the seeded tabs",
+        )
         composeRule.onNodeWithTag(SpaceTabTags.ADD).performClick()
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag(SpaceSettingsTags.NEW_NAME_FIELD)
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        composeRule.awaitTag(
+            SpaceSettingsTags.NEW_NAME_FIELD,
+            because = "the '+' tab did not open the New space dialog",
+        )
         composeRule.onNodeWithTag(SpaceSettingsTags.NEW_NAME_FIELD).performTextInput("Cooking")
         composeRule.onNodeWithTag(SpaceSettingsTags.NEW_CONFIRM).performClick()
 
-        composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag(SpaceTabTags.tab("space-cooking"))
-                .fetchSemanticsNodes().isNotEmpty()
-        }
+        composeRule.awaitTag(
+            SpaceTabTags.tab("space-cooking"),
+            because = "created space (POST /spaces → upsert → refresh) never surfaced its tab",
+        )
         composeRule.runOnIdle {
             assertEquals("space-cooking", libraryVm.activeSpaceId)
         }
