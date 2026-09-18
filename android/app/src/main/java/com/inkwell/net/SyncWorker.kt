@@ -41,13 +41,34 @@ class SyncWorker(
         return try {
             // Flush offline-created jobs in insertion order (SPEC §9.5).
             LoopServices.offlineQueue.flush { pending -> repo.submitAgentJob(pending.request) }
-            // Best-effort background refresh so terminal jobs are observed even if the
-            // foreground loop was not running when they completed.
-            repo.sync(null)
+            // Stage 22: background push-inbox discovery (5-min lane, SPEC §8). Guarded by the
+            // kill-switch; discovers host-pushed `to_user` jobs even when the app was killed.
+            if (com.inkwell.BuildConfig.PUSH_INBOX) {
+                pollPushInbox(repo)
+            } else {
+                // Best-effort background refresh so terminal jobs are observed even if the
+                // foreground loop was not running when they completed.
+                repo.sync(null)
+            }
             Result.success()
         } catch (_: Exception) {
             Result.retry()
         }
+    }
+
+    /** Materialise any pushed jobs waiting since the last run, advancing the persisted cursor. */
+    private suspend fun pollPushInbox(repo: DeviceRepository) {
+        val db = com.inkwell.data.InkDatabase.create(applicationContext)
+        val store = com.inkwell.data.RoomPushedCanvasStore(
+            canvasDao = db.canvasDao(),
+            layerDao = db.layerDao(),
+            folderDao = db.folderDao(),
+            rasterDao = db.rasterDao(),
+        )
+        val downloader = CachingBlobDownloader({ repo }, applicationContext.cacheDir)
+        val inbox = PushInbox(store, downloader)
+        val cursorStore = PrefsSyncCursorStore(applicationContext)
+        inbox.poll(repo, cursorStore)
     }
 
     companion object {

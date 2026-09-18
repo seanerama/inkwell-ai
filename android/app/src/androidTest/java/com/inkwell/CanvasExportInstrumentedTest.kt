@@ -1,11 +1,14 @@
 package com.inkwell
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.inkwell.render.CanvasExporter
 import com.inkwell.render.CoordinateMapping
 import com.inkwell.render.ExportLayer
+import com.inkwell.render.ExportRaster
+import com.inkwell.render.RasterFit
 import com.inkwell.render.RenderStroke
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -85,5 +88,43 @@ class CanvasExportInstrumentedTest {
         assertEquals(Color.WHITE, bmp.getPixel(0, bmp.height - 1))
         assertEquals(Color.WHITE, bmp.getPixel(bmp.width - 1, bmp.height - 1))
         bmp.recycle()
+    }
+
+    /**
+     * Stage 22 (acceptance): a pushed canvas's export composites the raster BENEATH the ink.
+     * A solid-red raster fills the canvas (z=-1); a black ink bar crosses the middle (z=0).
+     * A corner (raster only) reads red; the bar centre (ink over raster) reads black — proving
+     * the raster is below the ink, so the agent sees the document with the marks on top.
+     */
+    @Test
+    fun raster_composites_beneath_ink() {
+        val red = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.RED) }
+        val raster = ExportRaster(
+            z = -1,
+            visible = true,
+            bitmap = red,
+            placement = RasterFit.Placement(0f, 0f, widthCu.toFloat(), heightCu.toFloat()),
+        )
+        val midCy = 1754f
+        val inkBar = rect("bar", 1240f, midCy, 900f)
+
+        val result = CanvasExporter.export(
+            widthCu, heightCu,
+            layers = listOf(ExportLayer(z = 0, visible = true, strokes = listOf(inkBar))),
+            rasters = listOf(raster),
+        )
+        assertTrue("export should succeed", result is CanvasExporter.Result.Success)
+        result as CanvasExporter.Result.Success
+
+        val bmp = BitmapFactory.decodeByteArray(result.png, 0, result.png.size)
+        // Corner: raster fills the canvas, so the white background is covered → red.
+        assertEquals(Color.RED, bmp.getPixel(2, 2))
+        // Bar centre: ink drawn over the raster → black (ink wins, raster is beneath).
+        val scale = CoordinateMapping.exportScale(widthCu, heightCu)
+        val exX = (1240f * scale).roundToInt().coerceIn(0, bmp.width - 1)
+        val exY = (midCy * scale).roundToInt().coerceIn(0, bmp.height - 1)
+        assertEquals(Color.BLACK, bmp.getPixel(exX, exY))
+        bmp.recycle()
+        red.recycle()
     }
 }

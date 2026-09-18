@@ -165,6 +165,8 @@ class CanvasViewModelSendTest {
             )
             return SyncResponse(listOf(done), "c1")
         }
+        override suspend fun getCanvas(id: String) = error("unused")
+        override suspend fun downloadBlob(url: String) = error("unused")
         val patched = mutableListOf<Pair<String, String>>()
         val actioned = mutableListOf<Pair<String, String>>()
         override suspend fun patchCard(id: String, body: CardStateRequest): CardResponse {

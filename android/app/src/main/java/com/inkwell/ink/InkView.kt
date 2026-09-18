@@ -72,6 +72,10 @@ class InkView @JvmOverloads constructor(
     var onAnchorTap: ((Float, Float) -> Unit)? = null
 
     private val renderer = LayerRenderer()
+    // Stage 22: a pushed raster (PDF page / image) rendered BENEATH ink; cached, blitted
+    // through the same [transform] as ink so it tracks pan/zoom without re-rasterising.
+    private val rasterRenderer = com.inkwell.render.RasterRenderer()
+    private var documentVisible = true
     private val transform = CanvasTransform()
     private val policy = InkInputPolicy()
     private var hoverStylus = false
@@ -187,6 +191,19 @@ class InkView @JvmOverloads constructor(
         invalidate()
     }
 
+    /** Stage 22: set (or clear, with null) the pushed raster rendered beneath ink. */
+    fun setRaster(spec: com.inkwell.render.RasterRenderer.RasterSpec?) {
+        rasterRenderer.setRaster(spec)
+        invalidate()
+    }
+
+    /** Stage 22: layer-tray toggle for the "Document" (raster) layer's visibility. */
+    fun setDocumentVisible(visible: Boolean) {
+        if (documentVisible == visible) return
+        documentVisible = visible
+        invalidate()
+    }
+
     fun setTransform(scale: Float, tx: Float, ty: Float) {
         transform.scale = scale
         transform.tx = tx
@@ -196,6 +213,10 @@ class InkView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // Stage 22: the pushed raster renders FIRST, beneath ink (SPEC §4.3 / §5.2).
+        if (documentVisible && rasterRenderer.hasRaster()) {
+            rasterRenderer.draw(canvas, transform)
+        }
         val live = builder?.takeIf { !it.isEmpty }?.snapshotPoints()
         renderer.draw(
             canvas,

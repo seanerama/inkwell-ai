@@ -148,6 +148,79 @@ data class CardStateRequest(
     val state: String,
 )
 
+// --- Stage 22: pushed (`to_user`) job result + `GET /canvases/{id}` (contract device-api) ---
+
+/**
+ * A canvas as it appears inside a `to_user` job `result` or `GET /canvases/{id}` (SPEC §4.2).
+ * Pushed canvases are `origin=agent`. Defaults tolerate an older/partial server and match the
+ * frozen A4 canvas (2480×3508).
+ */
+@Serializable
+data class WireCanvas(
+    val id: String,
+    @SerialName("space_id") val spaceId: String,
+    val title: String = "",
+    @SerialName("width_cu") val widthCu: Int = 2480,
+    @SerialName("height_cu") val heightCu: Int = 3508,
+    val origin: String = "agent",
+)
+
+/** A layer inside a `to_user` result / canvas detail (SPEC §4.3). Raster layers sit at `z=-1`. */
+@Serializable
+data class WireLayer(
+    val id: String,
+    @SerialName("canvas_id") val canvasId: String,
+    val z: Int = -1,
+    val owner: String = "agent",
+    val type: String = "raster",
+    @SerialName("job_id") val jobId: String? = null,
+)
+
+/**
+ * A raster inside a `to_user` result / canvas detail (SPEC §4.5). The additive [url] is a
+ * fresh signed `GET /blobs/{key}` link (24 h, never stored — computed on read). Placement
+ * `x_cu/y_cu/w_cu/h_cu` is server-computed (top-left, fitted to canvas width, ADR-0012).
+ */
+@Serializable
+data class WireRaster(
+    val id: String,
+    @SerialName("layer_id") val layerId: String,
+    val url: String? = null,
+    val mime: String = "application/pdf",
+    val page: Int? = null,
+    @SerialName("x_cu") val xCu: Float = 0f,
+    @SerialName("y_cu") val yCu: Float = 0f,
+    @SerialName("w_cu") val wCu: Float = 0f,
+    @SerialName("h_cu") val hCu: Float = 0f,
+)
+
+/**
+ * A `to_user` job's `result` (contract device-api §`to_user` job types): the rows the device
+ * must materialise. `canvas` is the first page; the additive `canvases` sibling carries every
+ * page of a multi-page `agent.push_document` (absent for a single page — then use `[canvas]`).
+ */
+@Serializable
+data class PushResult(
+    val canvas: WireCanvas? = null,
+    val canvases: List<WireCanvas>? = null,
+    val layers: List<WireLayer> = emptyList(),
+    val rasters: List<WireRaster> = emptyList(),
+    val cards: List<CardResponse> = emptyList(),
+)
+
+/** `GET /canvases/{id}` response: a canvas with its layers + rasters (never strokes). */
+@Serializable
+data class CanvasDetail(
+    val id: String,
+    @SerialName("space_id") val spaceId: String,
+    val title: String = "",
+    @SerialName("width_cu") val widthCu: Int = 2480,
+    @SerialName("height_cu") val heightCu: Int = 3508,
+    val origin: String = "agent",
+    val layers: List<WireLayer> = emptyList(),
+    val rasters: List<WireRaster> = emptyList(),
+)
+
 /** The error envelope `{ "error": { "code", "message" } }` (contract device-api). */
 @Serializable
 data class ErrorEnvelope(

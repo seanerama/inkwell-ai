@@ -1,11 +1,14 @@
 package com.inkwell.net
 
+import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
+import retrofit2.http.Streaming
+import retrofit2.http.Url
 
 /**
  * Retrofit interface for the Stage 1 routes of contract `device-api` v1. Base URL
@@ -41,6 +44,24 @@ interface DeviceApi {
     /** `cursor` is passed back verbatim (opaque, contract device-api §Sync cursor). */
     @GET("v1/sync")
     suspend fun sync(@Query("cursor") cursor: String? = null): SyncResponse
+
+    /**
+     * Stage 22 (contract device-api `GET /canvases/{id}`): a canvas with its layers and
+     * rasters (never strokes). Each raster carries a fresh signed `url` (24 h) so a device
+     * that missed the sync window — or hit a 403 on a stale link — can re-fetch the blob.
+     */
+    @GET("v1/canvases/{id}")
+    suspend fun getCanvas(@Path("id") id: String): CanvasDetail
+
+    /**
+     * Stage 22: download a blob by its full signed URL (`GET /blobs/{key}?sig=&exp=`). The
+     * URL already carries the signature; the bearer header is added by [AuthInterceptor].
+     * `@Streaming` avoids buffering the whole (up to 20 MB) blob in memory before we copy it
+     * to the cache file. `@Url` takes the absolute link verbatim from the raster `url`.
+     */
+    @Streaming
+    @GET
+    suspend fun downloadBlob(@Url url: String): ResponseBody
 
     /** Stage 10: change a card's state (open|done|dismissed) → the updated card. */
     @PATCH("v1/cards/{id}")

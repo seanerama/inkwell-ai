@@ -128,6 +128,18 @@ android {
             // are additionally gated by SPACES_EDITABLE (stage 13, default OFF → 403). Flip to
             // "false" to restore the read-only tab bar without a code change.
             buildConfigField("boolean", "SPACE_SETTINGS", "true")
+            // Push-inbox kill-switch (Stage 22 feature flag, THIS stage's feature): ON makes
+            // the device discover host-pushed `to_user` jobs through a persisted `/sync`
+            // cursor, materialise them into agent-origin canvases with raster layers (PDF
+            // pages / images rendered BENEATH ink), show an unread tab badge / "New" dot, and
+            // composite the raster beneath the ink when the canvas is sent back. OFF = no
+            // cursor polling for `to_user`, no badges, and the raster rendering code stays
+            // inert (the app behaves exactly as before). Documented release-ON exception
+            // (same rationale as ONE_TAP_ASK/…/SPACES/SPACE_SETTINGS): default ON in debug
+            // AND release, because prod is not promoted, staging is the only environment, and
+            // the server push routes are additionally gated by PUSH_ENABLED (stage 21, default
+            // OFF). Flip to "false" to restore the pre-Stage-22 behaviour without a code change.
+            buildConfigField("boolean", "PUSH_INBOX", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -170,6 +182,11 @@ android {
             // (no long-press/menu, no "+" tab) without a code change. The server routes are also
             // gated by SPACES_EDITABLE (stage 13), so edits 403 unless the server enables them.
             buildConfigField("boolean", "SPACE_SETTINGS", "true")
+            // Stage 22 Push inbox: ON in release by documented exception (see the debug block
+            // and the stage-22 spec). Flip to "false" to stop `to_user` cursor polling and
+            // badges and leave the raster rendering code inert, without a code change. The
+            // server push routes are additionally gated by PUSH_ENABLED (stage 21, default OFF).
+            buildConfigField("boolean", "PUSH_INBOX", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

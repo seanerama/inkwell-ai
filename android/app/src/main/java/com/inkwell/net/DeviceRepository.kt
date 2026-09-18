@@ -47,6 +47,22 @@ class DeviceRepository(private val api: DeviceApi) {
 
     suspend fun sync(cursor: String?): SyncResponse = apiCall { api.sync(cursor) }
 
+    /**
+     * Stage 22: fetch a canvas with its layers + rasters (contract `GET /canvases/{id}`).
+     * Used to obtain a FRESH signed raster `url` when a materialise download 403s on a stale
+     * link (the rasters carry a 24 h link recomputed on every read).
+     */
+    suspend fun getCanvas(id: String): CanvasDetail = apiCall { api.getCanvas(id) }
+
+    /**
+     * Stage 22: download a blob by its full signed URL and return the raw bytes. Auth bearer
+     * is added by the interceptor; the signature is already in the URL. HTTP failures (e.g.
+     * `403` on an expired signature) surface as [ApiException] so the caller can retry with a
+     * fresh `url` from [getCanvas].
+     */
+    suspend fun downloadBlob(url: String): ByteArray =
+        apiCall { api.downloadBlob(url).use { it.bytes() } }
+
     /** Stage 10: set a card's state (open|done|dismissed); returns the updated card. */
     suspend fun patchCard(cardId: String, state: String): CardResponse =
         apiCall { api.patchCard(cardId, CardStateRequest(state = state)) }

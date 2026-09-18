@@ -46,6 +46,13 @@ data class CanvasEntity(
     // (no default) matches the entity — existing canvases stay at the root, undeleted.
     @ColumnInfo(name = "folder_id") val folderId: String? = null,
     @ColumnInfo(name = "deleted_at") val deletedAt: Long? = null,
+    // Stage 22 (contract `ink-storage` v4, additive): the unread marker for a pushed
+    // (agent-origin) canvas. `null` = never opened → shows a "New" dot / tab badge; set to
+    // epoch-ms the first time the canvas is opened. Nullable with a default so
+    // MIGRATION_3_4's `ADD COLUMN seen_at` (no default) aligns with the entity — every
+    // existing canvas keeps `seen_at` NULL, which for a user-origin canvas is never read
+    // (badges only count agent-origin unseen canvases). No v1/v2/v3 table is altered.
+    @ColumnInfo(name = "seen_at") val seenAt: Long? = null,
 )
 
 /**

@@ -107,6 +107,9 @@ fun CanvasScreen(
                         view.setAgentLayerVisible(viewModel.agentLayerVisible)
                         // Stage 12: an agent-origin canvas (a Formalize redraw) draws opaque.
                         view.setAgentOriginCanvas(viewModel.agentOriginCanvas)
+                        // Stage 22: the pushed raster (PDF page / image) renders beneath ink.
+                        view.setRaster(viewModel.canvasRaster)
+                        view.setDocumentVisible(viewModel.documentVisible)
                         // Stage 10: card → canvas anchor pulse (~1.5 s after a card tap).
                         view.setAnchorPulses(viewModel.anchorPulses)
                         if (debugEnabled) {
@@ -357,7 +360,14 @@ private fun LayerTray(viewModel: CanvasViewModel, modifier: Modifier = Modifier)
             viewModel.layerRows.forEach { row ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(text = row.label, modifier = Modifier.weight(1f))
-                    if (row.owner == "agent") {
+                    if (row.owner == "document") {
+                        // Stage 22: the pushed "Document" (raster) layer's visibility toggle.
+                        Switch(
+                            checked = viewModel.documentVisible,
+                            onCheckedChange = { viewModel.toggleDocumentLayer() },
+                            modifier = Modifier.testTag(CanvasTags.LAYER_TOGGLE_DOCUMENT),
+                        )
+                    } else if (row.owner == "agent") {
                         Switch(
                             checked = viewModel.agentLayerVisible,
                             onCheckedChange = { viewModel.toggleAgentLayer() },
@@ -700,6 +710,7 @@ object CanvasTags {
     const val PANEL_CLOSE = "canvas_panel_close"
     const val LAYER_TRAY = "canvas_layer_tray"
     const val LAYER_TOGGLE_AGENT = "canvas_layer_toggle_agent"
+    const val LAYER_TOGGLE_DOCUMENT = "canvas_layer_toggle_document"
 
     // Stage 7 one-tap ask surfaces.
     const val ADD_NOTE = "canvas_add_note"

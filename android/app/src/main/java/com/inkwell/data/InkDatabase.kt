@@ -23,8 +23,10 @@ import com.inkwell.data.dao.StrokeDao
  * ink strokes included — untouched, via [MIGRATION_1_2]. Version 3 (Stage 11) is also
  * **additive**: it adds the `folders` table and two nullable columns on `canvases`
  * (`folder_id`, `deleted_at`) via [MIGRATION_2_3] — no v1/v2 table is altered
- * destructively, so ink survives. The exported schema JSON lives in android/app/schemas/
- * and is committed.
+ * destructively, so ink survives. Version 4 (Stage 22) is also **additive**: it adds one
+ * nullable column `canvases.seen_at` (the unread marker for a pushed canvas) via
+ * [MIGRATION_3_4] — no v1/v2/v3 table is altered destructively, so ink survives. The
+ * exported schema JSON lives in android/app/schemas/ and is committed.
  *
  * A destructive fallback is forbidden in release builds (contract): [create] never calls
  * fallbackToDestructiveMigration, so a schema mismatch fails loudly rather than silently
@@ -40,7 +42,7 @@ import com.inkwell.data.dao.StrokeDao
         CardStateEntity::class,
         FolderEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -109,9 +111,21 @@ abstract class InkDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 → v4 (Stage 22, additive): add the nullable `seen_at` column to `canvases`
+         * (the unread marker for a pushed, agent-origin canvas). Purely additive — no
+         * v1/v2/v3 table is altered, `rasters` (a v1 table) is untouched, and existing
+         * canvases keep `seen_at` NULL, so ink survives the upgrade unchanged.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `canvases` ADD COLUMN `seen_at` INTEGER")
+            }
+        }
+
         fun create(context: Context): InkDatabase =
             Room.databaseBuilder(context, InkDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 // No fallbackToDestructiveMigration (contract ink-storage).
                 .build()
     }

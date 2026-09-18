@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.DropdownMenu
@@ -32,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.inkwell.BuildConfig
 import com.inkwell.data.SpaceEntity
 import com.inkwell.render.AnnotationRenderer
@@ -60,6 +63,8 @@ fun SpaceTabBar(
     onEditSpace: (String) -> Unit = {},
     onAddSpace: () -> Unit = {},
     settingsEnabled: Boolean = BuildConfig.SPACE_SETTINGS,
+    // Stage 22: unread pushed-canvas count per space id → a badge on the tab (SPEC §9.3).
+    unseenBySpace: Map<String, Int> = emptyMap(),
 ) {
     Surface(tonalElevation = 3.dp) {
         Row(
@@ -91,12 +96,33 @@ fun SpaceTabBar(
                                 .testTag(SpaceTabTags.tab(space.id)),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
-                            Text(
-                                text = space.name,
-                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (selected) accent else Color.Unspecified,
-                                maxLines = 1,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = space.name,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (selected) accent else Color.Unspecified,
+                                    maxLines = 1,
+                                )
+                                // Stage 22: unread pushed-canvas badge (count of `seen_at == null`).
+                                val unseen = unseenBySpace[space.id] ?: 0
+                                if (unseen > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(start = 4.dp)
+                                            .size(16.dp)
+                                            .background(accent, CircleShape)
+                                            .testTag(SpaceTabTags.badge(space.id)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            text = if (unseen > 9) "9+" else unseen.toString(),
+                                            color = Color.White,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+                            }
                             Box(
                                 modifier = Modifier
                                     .padding(top = 4.dp)
@@ -160,4 +186,7 @@ object SpaceTabTags {
 
     /** Stage 15: the "Space settings" item in a tab's long-press menu. */
     fun settings(id: String) = "space_tab_settings_$id"
+
+    /** Stage 22: the unread pushed-canvas badge on a tab. */
+    fun badge(id: String) = "space_tab_badge_$id"
 }
