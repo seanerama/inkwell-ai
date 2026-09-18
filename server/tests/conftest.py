@@ -44,7 +44,10 @@ def _clean():
     sm = get_sessionmaker()
     with sm() as session:
         session.execute(
-            text("TRUNCATE cards, jobs, canvases, device_tokens RESTART IDENTITY CASCADE")
+            text(
+                "TRUNCATE cards, jobs, canvases, device_tokens, app_meta "
+                "RESTART IDENTITY CASCADE"
+            )
         )
         session.commit()
         seed_default_spaces(session)

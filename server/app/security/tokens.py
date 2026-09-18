@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import DeviceToken
+from app.security.pepper import get_pepper_generation
 
 
 def _hash_with(pepper: str, plaintext: str) -> str:
@@ -49,11 +50,13 @@ def revoke_token(session: Session, token_id: str) -> bool:
 def verify_token(session: Session, plaintext: str) -> DeviceToken | None:
     """Return the active token row for ``plaintext``, or None if unknown/revoked.
 
-    ADR-0008 dual-pepper grace window (Stage 18): look the token up by the current-pepper
-    hash first (a DB index equality, constant-time as today). On a miss, and only when
-    ``token_pepper_previous`` is set, look it up by the previous-pepper hash; if that row
-    is live, re-hash it to the current pepper in this same request and bump
-    ``hash_version``. A revoked row is never resurrected under either pepper.
+    ADR-0008 dual-pepper grace window (Stage 18/20): look the token up by the
+    current-pepper hash first (a DB index equality, constant-time as today). On a miss,
+    and only when ``token_pepper_previous`` is set, look it up by the previous-pepper
+    hash; if that row is live, re-hash it to the current pepper in this same request and
+    stamp ``hash_version`` with the CURRENT pepper generation (Stage 20) so
+    ``migrate-check`` can fail closed. A revoked row is never resurrected under either
+    pepper.
     """
     settings = get_settings()
 
@@ -77,9 +80,10 @@ def verify_token(session: Session, plaintext: str) -> DeviceToken | None:
         if row is not None:
             if row.revoked_at is not None:
                 return None
-            # Migrate the row to the current pepper in this request.
+            # Migrate the row to the current pepper in this request, stamping the
+            # CURRENT generation so migrate-check can tell it has caught up (Stage 20).
             row.token_hash = _hash_with(settings.token_pepper, plaintext)
-            row.hash_version = (row.hash_version or 1) + 1
+            row.hash_version = get_pepper_generation(session)
             row.last_seen_at = datetime.now(UTC)
             session.commit()
             return row

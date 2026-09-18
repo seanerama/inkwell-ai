@@ -223,3 +223,18 @@ class DeviceToken(Base):
     hash_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1", default=1
     )
+
+
+class AppMeta(Base):
+    """Tiny key/value store for server-side operational state (Stage 20).
+
+    Currently holds ``pepper_generation`` (a stringified int) for the token-pepper
+    rotation grace window (ADR-0008). A MISSING ``pepper_generation`` row is treated as
+    generation 1 in code, so installs predating this stage and the migration-check
+    downgrade/upgrade cycle behave. See app/security/pepper.py.
+    """
+
+    __tablename__ = "app_meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)

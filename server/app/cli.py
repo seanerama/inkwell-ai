@@ -3,7 +3,9 @@
 inkwell token create --name <name>   # mint a token, print the plaintext once
 inkwell token revoke <id>            # revoke a token by id
 inkwell token list                   # list tokens (never prints the secret)
-inkwell token migrate-check          # exit 0 if all live tokens are on the newest pepper
+inkwell token rotate-pepper --begin  # start a pepper rotation (bump the generation)
+inkwell token rotate-pepper --end    # close the window (refuses while migrate-check is red)
+inkwell token migrate-check          # exit 0 only when no live token lags the generation
 inkwell db seed                      # idempotently seed the four default spaces
 inkwell canary [--space work] [--timeout 90]  # run one live agent job (deploy gate)
 """
@@ -13,9 +15,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+from app.config import get_settings
 from app.db.base import get_sessionmaker
 from app.db.models import DeviceToken
 from app.db.seed import seed_default_spaces
+from app.security.pepper import get_pepper_generation, set_pepper_generation
 from app.security.tokens import create_token, revoke_token
 
 
@@ -54,33 +58,91 @@ def _cmd_token_list(_: argparse.Namespace) -> int:
     return 0
 
 
-def _cmd_token_migrate_check(_: argparse.Namespace) -> int:
-    """Exit 0 when no live token still lags the newest pepper generation, else 1.
+def _pepper_stragglers(session) -> tuple[int, list[DeviceToken]]:
+    """The current pepper generation and the live tokens whose hash_version lags it.
 
-    ``target`` is MAX(hash_version) over ALL rows. A live (revoked_at IS NULL) token with
-    hash_version < target is a straggler that has not been seen since the pepper rotated;
-    while any exists the operator must NOT unset INKWELL_TOKEN_PEPPER_PREVIOUS. Zero
-    tokens, or all live tokens already at target, exit 0. The runbook runs this AFTER
-    using the tablet once, so at least one token has migrated and target has advanced.
+    A live (``revoked_at IS NULL``) token with ``hash_version < generation`` has not been
+    re-hashed since the rotation began. Uses the EXPLICIT generation from ``app_meta``
+    (Stage 20), not MAX(hash_version): MAX false-greens right after a rotation starts,
+    before any token has migrated, which was the Stage 20 bug.
     """
     from sqlalchemy import select
 
+    generation = get_pepper_generation(session)
+    live = (
+        session.execute(select(DeviceToken).where(DeviceToken.revoked_at.is_(None))).scalars().all()
+    )
+    return generation, [r for r in live if r.hash_version < generation]
+
+
+def _grace_window_red() -> bool:
+    """True when the grace window must stay open: previous pepper set AND a live straggler.
+
+    Fails closed — immediately after ``rotate-pepper --begin`` (generation bumped, the
+    previous pepper set, every token still on the old generation) this is True, and it
+    only goes False once every live token has been re-hashed to the current generation.
+    """
+    if not get_settings().token_pepper_previous:
+        return False
     sm = get_sessionmaker()
     with sm() as session:
-        rows = session.execute(select(DeviceToken)).scalars().all()
-    if not rows:
+        _, laggers = _pepper_stragglers(session)
+    return bool(laggers)
+
+
+def _cmd_token_migrate_check(_: argparse.Namespace) -> int:
+    """Exit 1 while the grace window must stay open, else 0 (Stage 20, fails closed).
+
+    Red (exit 1) when ``INKWELL_TOKEN_PEPPER_PREVIOUS`` is set AND any live token's
+    ``hash_version`` is below the current pepper generation recorded in ``app_meta``.
+    Green (exit 0) otherwise — no rotation in progress, or every live token has migrated.
+    """
+    prev_set = bool(get_settings().token_pepper_previous)
+    sm = get_sessionmaker()
+    with sm() as session:
+        generation, laggers = _pepper_stragglers(session)
+    if prev_set and laggers:
+        print(
+            f"{len(laggers)} live token(s) still below pepper generation {generation}; "
+            "keep INKWELL_TOKEN_PEPPER_PREVIOUS set:",
+            file=sys.stderr,
+        )
+        for r in laggers:
+            print(f"  {r.id}  {r.name}  v{r.hash_version}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _cmd_token_rotate_pepper(args: argparse.Namespace) -> int:
+    """Begin or end a token-pepper rotation grace window (Stage 20). Never prints secrets."""
+    if args.begin:
+        sm = get_sessionmaker()
+        with sm() as session:
+            current = get_pepper_generation(session)
+            new_generation = current + 1
+            set_pepper_generation(session, new_generation)
+        print(f"pepper generation bumped to {new_generation} (was {current}).")
+        print("Next steps (edit .env on the host, mode 600 — this command touches no secret):")
+        print("  1. Back up .env:  cp .env .env.bak-$(date +%Y%m%d-%H%M%S) && chmod 600 .env.bak-*")
+        print("  2. In .env set INKWELL_TOKEN_PEPPER_PREVIOUS=<old>, INKWELL_TOKEN_PEPPER=<new>.")
+        print("  3. dc up -d api worker")
+        print("  4. Use the tablet once (let it sync) or run the operator curl to migrate tokens.")
+        print("  5. inkwell token migrate-check  (RED until every live token reaches the new gen).")
+        print("  6. When green:  inkwell token rotate-pepper --end")
         return 0
-    target = max(r.hash_version for r in rows)
-    laggers = [r for r in rows if r.revoked_at is None and r.hash_version < target]
-    if not laggers:
-        return 0
-    print(
-        f"{len(laggers)} live token(s) still on an older pepper generation (target v{target}):",
-        file=sys.stderr,
-    )
-    for r in laggers:
-        print(f"  {r.id}  {r.name}  v{r.hash_version}", file=sys.stderr)
-    return 1
+
+    # --end
+    if _grace_window_red():
+        print(
+            "refusing to end the grace window: migrate-check is RED (a live token still "
+            "lags the current generation). Run `inkwell token migrate-check` for details.",
+            file=sys.stderr,
+        )
+        return 1
+    print("migrate-check is green; safe to close the grace window:")
+    print("  1. Clear INKWELL_TOKEN_PEPPER_PREVIOUS in .env (leave it empty).")
+    print("  2. dc up -d api worker")
+    return 0
 
 
 def _cmd_db_seed(_: argparse.Namespace) -> int:
@@ -111,6 +173,18 @@ def build_parser() -> argparse.ArgumentParser:
     revoke.set_defaults(func=_cmd_token_revoke)
     listp = token_sub.add_parser("list", help="list tokens")
     listp.set_defaults(func=_cmd_token_list)
+    rotate = token_sub.add_parser(
+        "rotate-pepper",
+        help="begin/end a token-pepper rotation grace window",
+    )
+    rotate_mode = rotate.add_mutually_exclusive_group(required=True)
+    rotate_mode.add_argument(
+        "--begin", action="store_true", help="bump the pepper generation and print next steps"
+    )
+    rotate_mode.add_argument(
+        "--end", action="store_true", help="close the window (refuses while migrate-check is red)"
+    )
+    rotate.set_defaults(func=_cmd_token_rotate_pepper)
     migrate_check = token_sub.add_parser(
         "migrate-check",
         help="exit 0 if no live token lags the newest pepper generation, else 1",

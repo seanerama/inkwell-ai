@@ -61,14 +61,18 @@ def test_no_previous_pepper_single_lookup_no_spurious_match(db, monkeypatch):
 
 
 def test_previous_pepper_hit_rehashes_and_bumps_version(db, monkeypatch):
-    # Mint under the old pepper.
+    from app.security.pepper import set_pepper_generation
+
+    # Mint under the old pepper (generation 1).
     _set_peppers(monkeypatch, current="pep-old", previous=None)
     row, plaintext = create_token(db, "tablet")
     token_id = row.id
     old_stored_hash = row.token_hash
 
-    # Rotate: new current, old kept as previous.
+    # Rotate: new current, old kept as previous, generation bumped to 2 (rotate-pepper
+    # --begin). The re-hash must stamp the CURRENT generation, not blindly +1.
     _set_peppers(monkeypatch, current="pep-new", previous="pep-old")
+    set_pepper_generation(db, 2)
     got = verify_token(db, plaintext)
     assert got is not None
     assert got.id == token_id
@@ -112,17 +116,21 @@ def test_revoked_under_previous_pepper_is_not_resurrected(db, monkeypatch):
     assert still.hash_version == 1  # untouched
 
 
-def test_migrate_check_all_migrated_exit_0(db, monkeypatch):
+def test_migrate_check_no_window_exit_0(db, monkeypatch):
+    # No rotation in progress (no previous pepper) -> green regardless of hash_version.
     _set_peppers(monkeypatch, current="pep-current", previous=None)
-    # Two live tokens, both on the same (newest) generation -> no straggler.
     create_token(db, "a")
     create_token(db, "b")
     assert _cmd_token_migrate_check(argparse_ns()) == 0
 
 
 def test_migrate_check_straggler_exit_1(db, monkeypatch):
-    _set_peppers(monkeypatch, current="pep-current", previous=None)
-    row_a, _ = create_token(db, "a")  # will be advanced to v2
+    from app.security.pepper import set_pepper_generation
+
+    # Grace window open (previous set), generation 2; one token has migrated, one lags.
+    _set_peppers(monkeypatch, current="pep-new", previous="pep-old")
+    set_pepper_generation(db, 2)
+    row_a, _ = create_token(db, "a")
     create_token(db, "b")  # stays v1 -> the straggler
     row_a.hash_version = 2
     db.commit()
@@ -135,7 +143,10 @@ def test_migrate_check_no_tokens_exit_0(db, monkeypatch):
 
 
 def test_migrate_check_revoked_straggler_ignored_exit_0(db, monkeypatch):
-    _set_peppers(monkeypatch, current="pep-current", previous=None)
+    from app.security.pepper import set_pepper_generation
+
+    _set_peppers(monkeypatch, current="pep-new", previous="pep-old")
+    set_pepper_generation(db, 2)
     row_a, _ = create_token(db, "a")
     row_b, _ = create_token(db, "b")
     row_a.hash_version = 2  # newest generation
