@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.15
+
+### Other
+- Stage 20: make the pepper grace window work in deployment + fail-closed migrate-check (#46)
+- Stage 19: fix restore.sh default scratch project name (lowercase) + label teardown (#45)
+- [stage 16] Fix: creating a space from the + tab does not surface the new tab (instrumented lane red on v0.0.13) (#44)
+- STATUS: nightly backup timer enabled on staging; nightly-style backup run verified
+- deploy: host-setup installs backup tooling via apt, pacman or dnf (mini-hp01 runs Omarchy)
+- Release v0.0.14: STATUS staging (backups live, restore drill, pepper rotation rolled back → stages 19, 20)
+
 ## 0.0.14
 
 ### Other

@@ -227,3 +227,14 @@ When a secret is (or may be) exposed:
      leak was the Anthropic key, not the pepper).
   4. Record it: `verity status note "closed 2026-09-16 ANTHROPIC_API_KEY exposure on staging <YYYY-MM-DD>: new key in place, old key deleted, /v1/usage clean"`.
 - `verity status note "completed compromise checklist for 2026-09-16 exposure on staging <YYYY-MM-DD>"`
+
+## Rotation log
+
+Dates and names only, never values. Mirror each line in STATUS with `verity status note`.
+
+| Date (UTC) | Env | Secret | Outcome |
+|---|---|---|---|
+| 2026-09-16 | staging | POSTGRES_PASSWORD, INKWELL_TOKEN_PEPPER, INKWELL_BLOB_SIGNING_KEY | rotated by hand after a session-log exposure; volumes wiped (pre-runbook) |
+| 2026-09-17 | staging | INKWELL_BLOB_SIGNING_KEY | rotated (§2); §2 verification route did not exist (fixed in stage 19) |
+| 2026-09-17 | staging | INKWELL_TOKEN_PEPPER | **failed** — grace window dead in deployment; rolled back from `.env.bak`; tablet 401 for ~2 min (stage 20) |
+| 2026-09-18 | staging | INKWELL_TOKEN_PEPPER | rotated (§3 on v0.0.15): begin → window → token use (v1→v2) → migrate-check green → end → window closed; tablet token 200 throughout, canary ok |

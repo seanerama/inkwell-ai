@@ -82,9 +82,9 @@ docker compose -p inkwell-restore-<ts> -f <printed-workdir>/compose.yml down -v
 | Check | Result |
 | --- | --- |
 | `GET /v1/health` ok (live) | pass (0.0.14) |
-| `backup.sh staging` exit 0, `latest` present, manifest written | pass (pre-deploy set via remote-deploy; nightly-style run 20260917T235505Z as operator; timer enabled, first scheduled run 2026-09-18 03:32 UTC) |
+| `backup.sh staging` exit 0, `latest` present, manifest written | pass (pre-deploy set via remote-deploy; nightly-style run 20260917T235505Z as operator; timer enabled; **first timer-driven set 20260918T033301Z confirmed 2026-09-18**) |
 | No secret printed during backup | pass (2026-09-17, v0.0.14 pre-deploy set 20260917T170918Z-pre-deploy) |
-| `restore.sh` scratch: `health=ok` | pass — but only with `--into inkwell-restore-drill`; the default project name is rejected by Compose (stage 19) |
+| `restore.sh` scratch: `health=ok` | pass — v0.0.14 only with `--into` (stage 19); **v0.0.15 2026-09-18: default project name `inkwell-restore-20260918-123227` worked, 5 spaces / 21 blobs, torn down with `--teardown`** |
 | Restored `spaces` count == live `/v1/spaces` | pass (5 = 5) |
 | Restored blob file count == live | pass (19 files; matches the archived volume) |
 | Scratch stack torn down; live stack untouched | pass (torn down by compose label; live health ok) |
