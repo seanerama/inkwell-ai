@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.16
+
+### Other
+- Stage 23: agent-kind tokens + POST /push routes so external scripts can push over HTTP (#52)
+- [stage 22] Inbox on the device: sync discovery of pushed jobs, raster layers from PDFs and images, tab badges, send back (#51)
+- Stage 21: server-side push origin — blob routes, canvas detail, to_user push jobs, inkwell push CLI (#50)
+- Plan v0.6 Phase 4: stages 21 (server push origin), 22 (device inbox + rasters), 23 (agent push API); ADR-0012
+- Release v0.0.15: STATUS staging (lanes all green; timer backup, default restore drill, pepper rotation verified)
+
 ## 0.0.15
 
 ### Other

@@ -99,12 +99,12 @@ curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" "$HOS
 
 | Check | Result |
 | --- | --- |
-| `GET /v1/health` ok | |
-| `inkwell push document` prints job + canvas id(s) | |
-| `GET /sync` shows a `to_user` `agent.push_document` job, `done`, with `canvases[]` | |
-| `GET /canvases/{id}` returns an `origin=agent` canvas with a raster `url` | |
-| `GET <signed url>` returns `200` and byte-identical PDF | |
-| Kill-switch OFF → blob `403 disabled` and CLI exit 2 | |
+| `GET /v1/health` ok | pass (2026-09-18, v0.0.16) |
+| `inkwell push document` prints job + canvas id(s) | pass (1-page → 1 canvas in learning; 3-page → 3 canvases in work) |
+| `GET /sync` shows a `to_user` `agent.push_document` job, `done`, with `canvases[]` | pass (2 to_user jobs, done; canvases=1 and 3) |
+| `GET /canvases/{id}` returns an `origin=agent` canvas with a raster `url` | pass (origin=agent, 1 layer, 1 raster application/pdf page 1, 2480×3509.5 CU) |
+| `GET <signed url>` returns `200` and byte-identical PDF | pass (200 application/pdf 981 B, identical; no bearer 401, bad sig 403) |
+| Kill-switch OFF → blob `403 disabled` and CLI exit 2 | not exercised on host (switch is ON on staging; covered by server tests) |
 
 ## Notes
 

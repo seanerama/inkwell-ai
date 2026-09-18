@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.15
+**Live version:** 0.0.16
 **Deployed at:** 2026-09-16T19:29:06Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:c80a4d831145132f2e00d0e6585e856b0fd3a79832b068170dd91068acbaa25d (v0.0.14) + data set /srv/inkwell/backups/staging/20260918T123115Z-pre-deploy
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:d67d6867f0aaf347c0f63a5838c4965b51a7e7173c09cd47eb7cdf6aac806b0b (v0.0.15) + data set /srv/inkwell/backups/staging/20260918T224045Z-pre-deploy
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.15 by digest (stages 16, 19, 20); all three release lanes green (instrumented lane green again); pre-deploy backup taken; canary passed; Playwright smoke 3/3; default restore drill passed and torn down; pepper rotation exercised end to end with the tablet token uninterrupted","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:d67d6867f0aaf347c0f63a5838c4965b51a7e7173c09cd47eb7cdf6aac806b0b","deployed_at":"2026-09-18T12:33:01Z"}
+- **staging:** {"status":"deployed v0.0.16 by digest (v0.6 Phase 4: push origin, device inbox, agent push API); all three release lanes green; pre-deploy backup; canary passed; Playwright smoke 3/3; push-server and push-api smokes passed on the host; tablet acceptance (smoke/push-inbox.md) pending","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:1f458930773d098228da88ddc6239c01270202d0c604f326e1449dfc90d46162","deployed_at":"2026-09-18T22:42:03Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
@@ -17,6 +17,7 @@
 - Staging backup sets @ mini-hp01:/srv/inkwell/backups/staging/<set>/ (db.dump, blobs.tar.zst, manifest.json; mode 700; latest symlink)
 - Staging .env rollback copy @ mini-hp01:/srv/inkwell/staging/.env.bak-20260917T171052Z (holds the pre-rotation blob key; delete after stage 20 lands)
 - Staging .env rollback copy @ mini-hp01:/srv/inkwell/staging/.env.bak-20260918T123201Z (pre-rotation pepper, now retired; delete after 2026-09-25)
+- Staging agent-kind push token (push-api-smoke) @ mini-hp01:/srv/inkwell/staging/agent-token.txt (mode 600; revoke with inkwell token revoke when no longer needed)
 
 ## Coordination notes
 - 2026-09-15: walking skeleton verified on the physical tablet against staging v0.0.4 (pair, Check, Ping round-trip). Pending on operator: rotate ANTHROPIC_API_KEY (exposed in a session log), sudo systemctl enable inkwell-staging. Prod not yet promoted (confirm gate).
@@ -29,3 +30,4 @@
 - v0.0.14 (stages 17–18) deployed to staging 2026-09-17 by digest; remote-deploy took the first pre-deploy backup (db 25 KB, blobs 217 KB). Host restore drill passed into a scratch project (5 spaces, 19 blobs, health ok) but only with --into: default project name rejected by Compose → bug stage 19 (#42). Rotated INKWELL_BLOB_SIGNING_KEY on staging 2026-09-17 (runbook §2; note its verification route does not exist — folded into #42). Pepper rotation (runbook §3) FAILED: compose does not pass INKWELL_TOKEN_PEPPER_PREVIOUS and migrate-check false-greened; tablet token was 401 for ~2 min, rolled back from .env.bak, token 200, canary ok → bug stage 20 (#43). PENDING on operator (sudo): run /tmp/host-setup.sh on mini-hp01 to install rclone + the nightly inkwell-backup@staging.timer (files staged in /tmp). Instrumented lane still red on the stage-16 test. Prod NOT promoted.
 - 2026-09-17: host-setup re-run on mini-hp01 (Omarchy/pacman): rclone installed, inkwell-backup@staging.timer enabled (next run 03:32 UTC 2026-09-18, RandomizedDelaySec); a nightly-style backup.sh run as the operator succeeded (set 20260917T235505Z, latest updated). Stage 17 exit state complete except the first timer-driven run, to be confirmed tomorrow via journalctl.
 - v0.0.15 (stages 16, 19, 20) deployed to staging 2026-09-18 by digest. First timer-driven backup confirmed (set 20260918T033301Z at 03:33 UTC) — stage 17 exit state complete. Default restore drill (no --into) passed on v0.0.15 and was torn down with restore.sh --teardown (stage 19 verified). Rotated INKWELL_TOKEN_PEPPER on staging 2026-09-18 (runbook §3: rotate-pepper --begin, grace window, migrate-check red→green after one token use, --end, window closed; tablet token 200 throughout, canary ok) — stage 20 verified; the 2026-09-17 rollback copy .env.bak-20260917T171052Z was deleted. Prod NOT promoted. Still pending on operator: confirm ANTHROPIC_API_KEY rotation from the 2026-09-16 exposure; choose an off-host BACKUP_REMOTE.
+- v0.0.16 (stages 21–23, Phase 4) deployed to staging 2026-09-18 by digest. Kill-switch flip: PUSH_ENABLED=true in staging .env (deliberate). Push-server smoke: CLI pushed a 1-page PDF to learning and a 3-page PDF to work; /sync shows both to_user jobs done; canvas detail returns a raster with a signed url; GET returns identical bytes (200), no bearer 401, bad sig 403. Push-api smoke: agent-kind token minted; POST /v1/push/document and /v1/push/canvas 201 over HTTPS; agent token on /sync 403, device token on push 403, no token 401. Four pushed canvases (learning: Q3 network plan; work: Three pages p1–p3 + Pushed over HTTP; home: Blank from API) are waiting for the tablet — owner runs smoke/push-inbox.md on the v0.0.16 APK. Prod NOT promoted.

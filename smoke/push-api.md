@@ -86,14 +86,14 @@ curl -sS -X POST "$HOST/v1/push/canvas" \
 
 | Check | Result |
 | --- | --- |
-| `GET /v1/health` ok | |
-| `inkwell token create --kind agent` prints `kind: agent` | |
-| `POST /v1/push/document` returns `201` + `job_id`/`canvas_ids` | |
-| Work tab badge increments; PDF renders; note card shows | |
-| Agent token on `/v1/sync` → `403 forbidden` | |
-| Device token on `/v1/push/document` → `403 forbidden` | |
-| Kill-switch OFF → push `403 disabled` | |
-| `POST /v1/push/canvas` returns `201` and a blank canvas appears | |
+| `GET /v1/health` ok | pass (2026-09-18, v0.0.16) |
+| `inkwell token create --kind agent` prints `kind: agent` | pass (push-api-smoke; stored on host, mode 600) |
+| `POST /v1/push/document` returns `201` + `job_id`/`canvas_ids` | pass (201, 1 canvas in work) |
+| Work tab badge increments; PDF renders; note card shows | pending — owner on tablet (smoke/push-inbox.md) |
+| Agent token on `/v1/sync` → `403 forbidden` | pass (403) |
+| Device token on `/v1/push/document` → `403 forbidden` | pass (403 on /v1/push/canvas; no token 401) |
+| Kill-switch OFF → push `403 disabled` | not exercised on host (switch ON; covered by server tests) |
+| `POST /v1/push/canvas` returns `201` and a blank canvas appears | pass (201, landscape canvas in home; tablet check pending) |
 
 ## Notes
 
