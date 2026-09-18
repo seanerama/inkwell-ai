@@ -116,17 +116,21 @@ fun SpaceTabBar(
                         }
                     }
                 }
-                // Stage 15: the trailing "+" tab creates a new space (a new agent).
-                if (settingsEnabled) {
-                    Text(
-                        text = "+",
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clickable { onAddSpace() }
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
-                            .testTag(SpaceTabTags.ADD),
-                    )
-                }
+            }
+            // Stage 16: the "+" is a FIXED trailing action OUTSIDE the horizontally-scrolling
+            // tab row, so it is always visible and hittable regardless of how many space tabs
+            // there are. Previously it sat at the end of the weighted `horizontalScroll` row and
+            // overflowed off-screen once the tabs filled the width (phone width), so a tap on it
+            // never registered and the New space dialog never opened (bug #37 / stage 16).
+            if (settingsEnabled) {
+                Text(
+                    text = "+",
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clickable { onAddSpace() }
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .testTag(SpaceTabTags.ADD),
+                )
             }
             if (notSynced) {
                 Text(
