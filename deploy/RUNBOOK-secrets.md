@@ -48,15 +48,19 @@
 
 ## 2. `INKWELL_BLOB_SIGNING_KEY`
 
-- **Impact:** signed blob URLs (ADR-0004) issued before the restart stop verifying.
-  They are short-lived and the device simply re-requests via `POST /v1/blobs`, so the
-  practical impact is nil.
+- **Impact:** **none today.** No blob route ships yet — `blobs/local.py` has a
+  `signed_url` helper but nothing serves it and there is no `POST /v1/blobs`, so no
+  signed blob URLs (ADR-0004) are issued to devices. Rotating this key therefore has no
+  user-visible effect until the blob routes land; when they do, pre-restart URLs would
+  stop verifying (short-lived; the device would re-request).
 - **Precondition (backup):** none required (no data change).
 - **Steps:**
   1. Edit `.env`: set `INKWELL_BLOB_SIGNING_KEY=<new>`.
   2. `dc up -d api worker`.
-- **Verification:** `POST /v1/blobs` with the tablet token returns a `url`; `GET`ting
-  that url returns the object (200). Old, pre-restart urls now 401/expired — expected.
+- **Verification:** `dc up -d api worker`, then poll `/v1/health` until
+  `{"status":"ok"}`, then `dc exec -T api inkwell canary` — exports still store and the
+  job runs (this is what is observable today; there is no blob route to verify a signed
+  URL against yet).
 - **Rollback:** restore the previous key in `.env` and `dc up -d api worker`.
 - `verity status note "rotated INKWELL_BLOB_SIGNING_KEY on <env> <YYYY-MM-DD>"`
 

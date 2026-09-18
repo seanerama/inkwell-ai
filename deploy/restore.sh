@@ -15,20 +15,51 @@
 # Overridable for CI: INKWELL_SRV_DIR (source env base, default /srv/inkwell).
 set -euo pipefail
 
-usage() { echo "usage: restore.sh <backup-dir> [--into <project>] [--yes]" >&2; exit 1; }
+usage() { echo "usage: restore.sh <backup-dir> [--into <project>] [--yes] | restore.sh --teardown <project>" >&2; exit 1; }
+
+# Docker Compose project-name rule. A default scratch name must satisfy this, and a
+# bad --into value (e.g. one with uppercase) must fail EARLY instead of at `dc up`.
+PROJECT_NAME_RE='^[a-z0-9][a-z0-9_-]*$'
+require_valid_project() {
+  if ! printf '%s' "$1" | grep -qE "$PROJECT_NAME_RE"; then
+    echo "!! invalid compose project name '$1' (must match ${PROJECT_NAME_RE}; lowercase, no 'T'/'Z' timestamps)" >&2
+    exit 1
+  fi
+}
+
+# Label-based teardown: removes a project's containers, network, and volumes using the
+# compose labels only — does NOT depend on the ephemeral temp compose file this script
+# writes and deletes.
+teardown_project() {
+  local p="$1"
+  require_valid_project "$p"
+  echo ">> tearing down project '$p' by label"
+  docker ps -aq --filter "label=com.docker.compose.project=$p" | xargs -r docker rm -f
+  docker network ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker network rm
+  docker volume ls -q --filter "label=com.docker.compose.project=$p" | xargs -r docker volume rm -f
+}
 
 BACKUP_DIR=""
 INTO=""
+TEARDOWN=""
 ASSUME_YES=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --into) INTO="${2:?--into needs a value}"; shift 2 ;;
+    --teardown) TEARDOWN="${2:?--teardown needs a value}"; shift 2 ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) usage ;;
     -*) echo "unknown option: $1" >&2; usage ;;
     *) if [ -z "$BACKUP_DIR" ]; then BACKUP_DIR="$1"; shift; else echo "unexpected arg: $1" >&2; usage; fi ;;
   esac
 done
+
+# --teardown <project> stands alone: tear the project down by label and exit.
+if [ -n "$TEARDOWN" ]; then
+  teardown_project "$TEARDOWN"
+  exit 0
+fi
+
 [ -n "$BACKUP_DIR" ] || usage
 RESOLVED="$(cd "$BACKUP_DIR" 2>/dev/null && pwd)" || RESOLVED=""
 if [ -z "$RESOLVED" ] || [ ! -d "$RESOLVED" ]; then
@@ -65,7 +96,7 @@ GOT_BLOB="$(sha256sum "$BACKUP_DIR/blobs.tar.zst" | awk '{print $1}')"
 echo ">> integrity ok"
 
 # 2. Decide target: live (over an existing env dir) vs scratch (own project/volumes/port).
-TS="$(date -u +%Y%m%dT%H%M%SZ)"
+TS="$(date -u +%Y%m%d-%H%M%S)"
 LIVE=0
 if [ -n "$INTO" ] && [ -f "$SRV/$INTO/compose.yml" ]; then
   LIVE=1
@@ -80,6 +111,10 @@ else
   grep -vE '^API_PORT=' "$SOURCE_ENV_DIR/.env" > "$WORK_DIR/.env"
   ENV_FILE="$WORK_DIR/.env"
 fi
+
+# Fail early on an invalid project name — the default scratch name, a scratch --into, or
+# an over-live --into (the operator's own env dir name) all pass through here.
+require_valid_project "$PROJECT"
 
 if [ "$LIVE" -eq 1 ]; then
   if [ "$ASSUME_YES" -ne 1 ]; then
@@ -171,7 +206,10 @@ if [ "$LIVE" -eq 1 ]; then
   echo ">> live restore complete on project '$PROJECT'"
 else
   echo ">> scratch restore left RUNNING as project '$PROJECT' on port $API_PORT"
-  echo ">> tear down with: docker compose -p $PROJECT -f $WORK_DIR/compose.yml down -v"
+  echo ">> tear down with: $0 --teardown $PROJECT"
+  echo ">>   or by label:  docker ps -aq --filter label=com.docker.compose.project=$PROJECT | xargs -r docker rm -f"
+  echo ">>                  docker network ls -q --filter label=com.docker.compose.project=$PROJECT | xargs -r docker network rm"
+  echo ">>                  docker volume ls -q --filter label=com.docker.compose.project=$PROJECT | xargs -r docker volume rm -f"
 fi
 
 [ "$HEALTH" = "ok" ] || { echo "!! restored stack never became healthy" >&2; exit 1; }
