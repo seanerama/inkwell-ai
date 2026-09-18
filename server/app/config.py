@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # ADR-0008: POST /jobs rate limit, submissions per token per minute.
     job_rate_limit_per_min: int = 30
 
+    # Stage 23: push API rate limit, requests per agent token per minute.
+    push_rate_limit_per_min: int = 10
+
     # ADR-0003: seconds a claimed job may stay `running` before the lease expires.
     lease_seconds: int = 120
 

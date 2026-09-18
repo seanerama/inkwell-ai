@@ -52,6 +52,7 @@ def _clean():
         session.commit()
         seed_default_spaces(session)
     app.state.rate_limiter.reset()
+    app.state.push_rate_limiter.reset()
     yield
 
 

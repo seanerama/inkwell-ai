@@ -28,10 +28,19 @@ def hash_token(plaintext: str) -> str:
     return _hash_with(get_settings().token_pepper, plaintext)
 
 
-def create_token(session: Session, name: str) -> tuple[DeviceToken, str]:
-    """Mint a token. Returns the row and the plaintext (shown to the operator once)."""
+TOKEN_KINDS = ("device", "agent")
+
+
+def create_token(session: Session, name: str, kind: str = "device") -> tuple[DeviceToken, str]:
+    """Mint a token. Returns the row and the plaintext (shown to the operator once).
+
+    ``kind`` is ``device`` (device routes) or ``agent`` (Stage 23 push API); any other
+    value is a programming error and raises ``ValueError``.
+    """
+    if kind not in TOKEN_KINDS:
+        raise ValueError(f"invalid token kind {kind!r}; must be one of {', '.join(TOKEN_KINDS)}")
     plaintext = secrets.token_urlsafe(32)
-    row = DeviceToken(name=name, token_hash=hash_token(plaintext))
+    row = DeviceToken(name=name, token_hash=hash_token(plaintext), kind=kind)
     session.add(row)
     session.commit()
     session.refresh(row)

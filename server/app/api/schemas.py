@@ -130,6 +130,22 @@ class BlobOut(BaseModel):
     expires_at: datetime
 
 
+class PushCanvasIn(BaseModel):
+    """Body for ``POST /v1/push/canvas`` (Stage 23, agent-token only)."""
+
+    space: str = Field(min_length=1, max_length=64)
+    title: str = Field(min_length=1, max_length=255)
+    landscape: bool = False
+    note: str | None = None
+
+
+class PushOut(BaseModel):
+    """``POST /v1/push/{document,canvas}`` → ``{ job_id, canvas_ids }`` (Stage 23)."""
+
+    job_id: str
+    canvas_ids: list[str]
+
+
 class CardOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
