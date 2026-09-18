@@ -264,3 +264,58 @@ raster is fitted to the canvas width and placed at the top-left, portrait pages 
 canvas and landscape pages on the same-area swap (ADR-0012). `agent.push_canvas` writes a
 blank agent-origin canvas only (`layers: []`, `rasters: []`) — the device creates the
 `user/ink` layer on the first stroke.
+
+### Stage 23 additions — 2026-09-18
+
+Stage 23 adds the agent push API: two additive routes that let any script on the tailnet
+push over HTTPS, plus the `tokens.kind` device-vs-agent access split. Nothing frozen above
+changes — the route table, entity shapes, the `to_user` result shape, and the error
+envelope are untouched. New routes and one new token attribute only (framework-spec §4.3,
+ADR-0012 §4).
+
+**Token kinds (`tokens.kind`).** Every bearer token now has a `kind`: `device` (the
+default) or `agent`. It is minted by the operator CLI (`inkwell token create --name … [--kind device|agent]`)
+and backfilled to `device` for existing tokens by an additive migration. The kind is a
+server-side access split; it is never sent on the wire by a client:
+
+- **`device` tokens** authenticate the device routes (everything in the frozen table
+  above). An `agent` token presented to any device route → `403 { error.code: "forbidden" }`.
+- **`agent` tokens** authenticate only the push API below. A `device` token presented to a
+  push route → `403 { error.code: "forbidden" }`.
+- Missing/invalid/revoked bearer → `401 { error.code: "unauthorized" }` on every route
+  (unchanged). `GET /health` stays unauthenticated.
+
+Both push routes are additionally gated by the existing `PUSH_ENABLED` env (default OFF,
+the same kill-switch as `POST /blobs`); when off they return `403 { error.code: "disabled" }`.
+Each is rate-limited to **10 requests per minute per agent token**; the 11th in a window →
+`429 { error.code: "rate_limited" }` with a `Retry-After` header. An unknown `space` slug →
+`404 { error.code: "not_found" }`. Both return `201` with the shape:
+
+```json
+{ "job_id": "uuid", "canvas_ids": ["uuid", "..."] }
+```
+
+`job_id` is the created `to_user` job; `canvas_ids` are the agent-origin canvases it made
+(one per page for a document, one for a canvas). The materialised `to_user` job itself
+(with the frozen `{ canvas, layers, rasters, cards }` result plus the Stage 21 additive
+`canvases[]`/`url` fields) reaches the device through `/sync` as usual.
+
+**`POST /v1/push/document`** (multipart) — agent token only.
+- Fields: `file` (the bytes), `space` (slug, required), `title?`, `note?` (becomes an
+  `answer` card body).
+- Same limits and sniffing as `POST /blobs`: **20 MB** cap → `413 { error.code: "too_large" }`;
+  mime allow-list `application/pdf`/`image/png`/`image/jpeg` decided by **sniffing the
+  leading magic bytes** (the declared content-type is never trusted) → non-allow-listed
+  `415 { error.code: "unsupported_media_type" }`. A readable-but-invalid document (e.g. a
+  PDF over the 20-page cap, or an unreadable/empty PDF) → `422 { error.code: "validation" }`.
+- One `origin=agent` canvas per page with a `raster` layer at `z=-1` (ADR-0012).
+
+**`POST /v1/push/canvas`** (JSON) — agent token only. Body:
+
+```json
+{ "space": "work", "title": "Sketch", "landscape": false, "note": "optional card body" }
+```
+
+Writes a blank `origin=agent` canvas (A4 portrait, or the same-area landscape swap when
+`landscape` is true) and a done `to_user` `agent.push_canvas` job. `space` and `title` are
+required.

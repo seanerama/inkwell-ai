@@ -223,6 +223,12 @@ class DeviceToken(Base):
     hash_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1", default=1
     )
+    # Stage 23: token kind. "device" tokens use the device routes (require_token);
+    # "agent" tokens use the push API (require_agent_token) and cannot read device
+    # routes. Additive migration 0005 backfills every existing row with "device".
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="device", default="device"
+    )
 
 
 class AppMeta(Base):

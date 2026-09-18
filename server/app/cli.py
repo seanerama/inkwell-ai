@@ -26,9 +26,10 @@ from app.security.tokens import create_token, revoke_token
 def _cmd_token_create(args: argparse.Namespace) -> int:
     sm = get_sessionmaker()
     with sm() as session:
-        row, plaintext = create_token(session, args.name)
+        row, plaintext = create_token(session, args.name, kind=args.kind)
     print(f"id: {row.id}")
     print(f"name: {row.name}")
+    print(f"kind: {row.kind}")
     print(f"token: {plaintext}")
     print("Store this token now; it is not recoverable.")
     return 0
@@ -54,7 +55,10 @@ def _cmd_token_list(_: argparse.Namespace) -> int:
     for r in rows:
         state = "revoked" if r.revoked_at else "active"
         last_seen = r.last_seen_at.isoformat() if r.last_seen_at else "never"
-        print(f"{r.id}  {r.name:20s}  {state:8s}  v{r.hash_version}  last_seen={last_seen}")
+        print(
+            f"{r.id}  {r.name:20s}  {r.kind:6s}  {state:8s}  v{r.hash_version}  "
+            f"last_seen={last_seen}"
+        )
     return 0
 
 
@@ -229,6 +233,12 @@ def build_parser() -> argparse.ArgumentParser:
     token_sub = token.add_subparsers(dest="action", required=True)
     create = token_sub.add_parser("create", help="mint a token")
     create.add_argument("--name", required=True)
+    create.add_argument(
+        "--kind",
+        choices=["device", "agent"],
+        default="device",
+        help="token kind: device (default) or agent (push API)",
+    )
     create.set_defaults(func=_cmd_token_create)
     revoke = token_sub.add_parser("revoke", help="revoke a token by id")
     revoke.add_argument("id")

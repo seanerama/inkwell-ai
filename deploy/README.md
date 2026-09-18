@@ -102,6 +102,44 @@ against the live `/v1/spaces` and `/v1/usage` every minor release; record it in
 `smoke/backup-restore.md`. The `backup-restore` CI gate exercises the same round-trip on
 every push.
 
+## Pushing from a script (agent tokens)
+
+Any script on the tailnet can push a PDF/PNG or a blank canvas to a space over HTTPS with
+an **agent-kind** token (Stage 23, ADR-0012 §4). Agent tokens can only reach the push API;
+they cannot read the device routes, and device tokens cannot push. The push API is gated by
+the same `PUSH_ENABLED` kill-switch as the blob routes (default OFF).
+
+Mint an agent token on the host (never on the workstation):
+
+```sh
+dc run --rm -T api inkwell token create --name "workstation-push" --kind agent
+# prints: id / name / kind: agent / token — store the token; it is not recoverable
+export TOKEN="<the printed token>"
+export HOST="https://mini-hp01.taile0ffc4.ts.net:8444"   # staging :8444, prod :8443
+```
+
+Push a document (multipart; one agent-origin canvas per page, delivered via `/sync`):
+
+```sh
+curl -sS -X POST "$HOST/v1/push/document" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F file=@brief.pdf -F space=work -F title="Brief" -F note="Please review"
+# {"job_id":"…","canvas_ids":["…"]}
+```
+
+Push a blank canvas (JSON):
+
+```sh
+curl -sS -X POST "$HOST/v1/push/canvas" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"space":"work","title":"Sketch","landscape":false}'
+```
+
+Limits mirror `POST /blobs`: 20 MB, PDFs ≤ 20 pages, mime decided by magic-byte sniff
+(`413`/`415`/`422`); unknown space → `404`; kill-switch off → `403 disabled`; rate limit
+10/min per agent token → `429`. Record each agent token in `.verity/deploy-access.md` by
+**location only** (who holds it and where it runs — never the secret itself).
+
 ## Local gate database
 
 The `server-test` gate needs a real Postgres:
