@@ -68,50 +68,59 @@
 
 ## 3. `INKWELL_TOKEN_PEPPER` (with the dual-pepper grace window)
 
-> **DO NOT RUN until stage 20 (#43) is merged and deployed.** Exercised on staging
-> 2026-09-17 (v0.0.14): the grace window did not work because `deploy/compose.yml`
-> does not pass `INKWELL_TOKEN_PEPPER_PREVIOUS` to the containers, and
-> `migrate-check` exited 0 while the token was still on the old pepper. Rotating the
-> pepper on the current deployment invalidates every device token; the only rollback
-> is restoring `INKWELL_TOKEN_PEPPER` from `.env.bak-<ts>`.
-
 - **Impact:** **none** when the tablet syncs during the grace window — the token keeps
   working with no re-pairing. Without the grace window, rotating the pepper invalidates
   every device token (ADR-0008 original consequence). If a device never syncs during the
   window, only that device must re-pair afterwards.
 - **Precondition (backup):** `backup.sh <env> --label pre-rotate` (confirm exit 0). The
-  rotation writes to `device_tokens`.
-- **How the grace window works:** `verify_token` looks a token up by the CURRENT-pepper
-  hash first; on a miss, and only while `INKWELL_TOKEN_PEPPER_PREVIOUS` is set, it looks
-  it up by the PREVIOUS-pepper hash and, if the row is live, re-hashes it to the current
-  pepper in that same request and bumps `hash_version`. Revoked rows are never
-  resurrected under either pepper. When the previous pepper is unset, behaviour is
-  exactly single-pepper (the safe default — no kill-switch flag needed).
-- **`inkwell token migrate-check` semantics:** let `target = MAX(hash_version)` over ALL
-  tokens; it exits **0** when no live (`revoked_at IS NULL`) token has
-  `hash_version < target` (including zero tokens or all-equal), and **1** otherwise,
-  printing the lagging tokens' ids to stderr. Run it **after** the tablet has synced at
-  least once — that first sync migrates a token and advances `target`, so a straggler
-  (a device that has not synced since the rotation) shows up as < target.
+  rotation writes to `device_tokens`. Also copy `.env` aside first:
+  `cp .env .env.bak-$(date +%Y%m%d-%H%M%S) && chmod 600 .env.bak-*` — the locked-out
+  rollback below restores the old pepper from it.
+- **How the grace window works:** the compose `app-env` anchor now passes
+  `INKWELL_TOKEN_PEPPER_PREVIOUS` to `api` **and** `worker` (Stage 20 — before that it
+  never reached the containers and the window was dead). `verify_token` looks a token up
+  by the CURRENT-pepper hash first; on a miss, and only while
+  `INKWELL_TOKEN_PEPPER_PREVIOUS` is set, it looks it up by the PREVIOUS-pepper hash and,
+  if the row is live, re-hashes it to the current pepper in that same request and stamps
+  `hash_version` with the CURRENT pepper generation. Revoked rows are never resurrected
+  under either pepper. When the previous pepper is unset, behaviour is exactly
+  single-pepper (the safe default — no kill-switch flag needed).
+- **`inkwell token migrate-check` semantics (Stage 20 — fails closed):** the generation
+  is an explicit integer in the `app_meta` table, bumped by `rotate-pepper --begin`
+  (a missing row means generation 1). `migrate-check` exits **1** while
+  `INKWELL_TOKEN_PEPPER_PREVIOUS` is set **and** any live (`revoked_at IS NULL`) token
+  has `hash_version <` the current generation, printing the stragglers to stderr; it
+  exits **0** otherwise. This means it is RED the instant the window opens (before any
+  token migrates) and only goes GREEN once every live token has been re-hashed — it can
+  never say "safe to close" while a device is still on the old pepper. (The old
+  `MAX(hash_version)` rule false-greened at the start of a rotation; that was the bug.)
 - **Steps:**
-  1. In `.env` set `INKWELL_TOKEN_PEPPER_PREVIOUS=<old-pepper>` and
+  1. `dc exec -T api inkwell token rotate-pepper --begin` — records the next generation
+     in `app_meta` and prints these steps. It touches no secret.
+  2. In `.env` set `INKWELL_TOKEN_PEPPER_PREVIOUS=<old-pepper>` and
      `INKWELL_TOKEN_PEPPER=<new-pepper>`.
-  2. `dc up -d api worker`.
-  3. Use the tablet once — any `/v1/sync` (open the app, let it sync). This re-hashes its
-     token to the new pepper.
-  4. `dc exec -T api inkwell token list` — the tablet's row should now show `v2`.
-  5. `dc exec -T api inkwell token migrate-check` — must exit `0` (no live straggler).
-     If it exits `1`, one or more devices have not synced yet: sync them (or accept that
-     they will re-pair) before finishing.
-  6. Remove `INKWELL_TOKEN_PEPPER_PREVIOUS` from `.env` (clear the value) and
+  3. `dc up -d api worker`.
+  4. Use the tablet once — any `/v1/sync` (open the app, let it sync), or the operator's
+     curl with the tablet token. This re-hashes its token to the new pepper/generation.
+  5. `dc exec -T api inkwell token list` — the tablet's row should now show the new `v`.
+  6. `dc exec -T api inkwell token migrate-check` — must exit `0`. While it exits `1`,
+     one or more live devices have not synced yet: sync them (or revoke/accept re-pair)
+     before finishing.
+  7. `dc exec -T api inkwell token rotate-pepper --end` — refuses (exit 1) while
+     `migrate-check` is red; on success it confirms it is safe to close the window.
+  8. Remove `INKWELL_TOKEN_PEPPER_PREVIOUS` from `.env` (clear the value) and
      `dc up -d api worker`.
-- **Verification:** `inkwell token list` shows the live token(s) at `hash_version 2`
-  with a recent `last_seen`; the tablet keeps working without re-pairing.
-- **Rollback:** while the grace window is still open (previous pepper still set), swap the
-  two values back (`INKWELL_TOKEN_PEPPER=<old>`, previous unset) and `dc up -d api
-  worker`; tokens re-hash back on next use. Once the previous pepper has been removed and
-  every token is at the new generation, rollback means re-pairing any device you must
-  revert.
+- **Verification:** `inkwell token list` shows the live token(s) at the new
+  `hash_version` with a recent `last_seen`; `migrate-check` exits 0; the tablet keeps
+  working without re-pairing.
+- **Rollback:**
+  - *Window still open* (previous pepper still set): swap the two values back
+    (`INKWELL_TOKEN_PEPPER=<old>`, previous cleared) and `dc up -d api worker`; tokens
+    re-hash back on next use.
+  - *Window already closed / device locked out*: restore `INKWELL_TOKEN_PEPPER` from the
+    `.env.bak-<ts>` you took above (and clear `INKWELL_TOKEN_PEPPER_PREVIOUS`) and
+    `dc up -d api worker`; the device's token verifies again. If the old pepper is truly
+    gone, re-pair the device with `inkwell token create`.
 - `verity status note "rotated INKWELL_TOKEN_PEPPER on <env> <YYYY-MM-DD> (grace window; migrate-check green)"`
 
 ---

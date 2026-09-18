@@ -5,6 +5,8 @@ dist/
 .env
 .env.*
 !.env.*.example
+# Tracked deploy template; the env/compose parity gate (stage 20) reads it in CI.
+!deploy/.env.example
 # Verity's derived state cache — never authoritative (framework-spec §5)
 .verity-cache/
 # Per-app deployment access (host + credential locations) — shared out-of-band,
