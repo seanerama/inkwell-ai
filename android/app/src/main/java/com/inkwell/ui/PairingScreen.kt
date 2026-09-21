@@ -44,6 +44,13 @@ fun PairingScreen(
     ) {
         Text(text = "Inkwell AI — Pairing")
 
+        // Stage 28: show the installed app version so upgrade confusion is visible; the
+        // paired server's /health version is surfaced in the status line by Check below.
+        Text(
+            text = "App v${BuildConfig.VERSION_NAME}",
+            modifier = Modifier.testTag(PairingTags.APP_VERSION),
+        )
+
         OutlinedTextField(
             value = viewModel.serverUrl,
             onValueChange = viewModel::onServerUrlChange,
@@ -92,6 +99,7 @@ fun PairingScreen(
 
 /** Stable tags for the instrumented/Compose tests. */
 object PairingTags {
+    const val APP_VERSION = "pairing_app_version"
     const val SERVER_URL = "pairing_server_url"
     const val TOKEN = "pairing_token"
     const val CHECK = "pairing_check"
