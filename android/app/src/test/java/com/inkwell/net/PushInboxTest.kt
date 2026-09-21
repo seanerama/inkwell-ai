@@ -7,11 +7,17 @@ import com.inkwell.data.RasterEntity
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import retrofit2.HttpException
+import retrofit2.Response
+import java.io.File
 
 /**
  * JVM unit tests for [PushInbox] (Stage 22, ADR-0012) with in-memory fakes (no emulator,
@@ -77,6 +83,80 @@ class PushInboxTest {
         override suspend fun downloadBlob(url: String) = error("unused")
     }
 
+    /** A [DeviceApi] whose every route errors; the two fakes below override only what they use. */
+    private abstract class UnusedApi : DeviceApi {
+        override suspend fun health() = error("unused")
+        override suspend fun spaces() = error("unused")
+        override suspend fun createSpace(body: SpaceCreateRequest) = error("unused")
+        override suspend fun patchSpace(id: String, body: SpacePatchRequest) = error("unused")
+        override suspend fun createJob(body: JobCreateRequest) = error("unused")
+        override suspend fun getJob(id: String) = error("unused")
+        override suspend fun cancelJob(id: String) = error("unused")
+        override suspend fun sync(cursor: String?): SyncResponse = error("unused")
+        override suspend fun patchCard(id: String, body: CardStateRequest) = error("unused")
+        override suspend fun runCardAction(id: String, actionId: String) = error("unused")
+        override suspend fun getCanvas(id: String): CanvasDetail = error("unused")
+        override suspend fun downloadBlob(url: String): ResponseBody = error("unused")
+    }
+
+    /**
+     * Serves one `/sync` page; the first blob GET (stale url) 403s, `getCanvas` then hands back
+     * a fresh url, and the second blob GET (that fresh url) returns the pdf bytes.
+     */
+    private class FakeBlobApi(
+        private val page: SyncResponse,
+        private val freshUrl: String,
+        private val pdfBytes: ByteArray,
+    ) : UnusedApi() {
+        var blobCalls = 0
+        var canvasCalls = 0
+        override suspend fun sync(cursor: String?): SyncResponse = page
+        override suspend fun getCanvas(id: String): CanvasDetail {
+            canvasCalls++
+            return CanvasDetail(
+                id = id,
+                spaceId = "s1",
+                title = "Brief",
+                layers = listOf(WireLayer(id = "l-$id", canvasId = id)),
+                rasters = listOf(
+                    WireRaster(id = "r-$id", layerId = "l-$id", url = freshUrl, mime = "application/pdf", page = 0),
+                ),
+            )
+        }
+        override suspend fun downloadBlob(url: String): ResponseBody {
+            blobCalls++
+            if (url != freshUrl) {
+                // The signed link expired between sync and download → server 403.
+                throw HttpException(
+                    Response.error<ResponseBody>(
+                        403,
+                        """{"error":{"code":"forbidden","message":"expired signature"}}"""
+                            .toResponseBody("application/json".toMediaType()),
+                    ),
+                )
+            }
+            return pdfBytes.toResponseBody("application/pdf".toMediaType())
+        }
+    }
+
+    /** 422s on any non-null cursor (unknown/stale), then serves [page] on the re-seeded sync(null). */
+    private class ReseedApi(private val page: SyncResponse) : UnusedApi() {
+        val cursorsSent = mutableListOf<String?>()
+        override suspend fun sync(cursor: String?): SyncResponse {
+            cursorsSent += cursor
+            if (cursor != null) {
+                throw HttpException(
+                    Response.error<ResponseBody>(
+                        422,
+                        """{"error":{"code":"validation","message":"unknown cursor"}}"""
+                            .toResponseBody("application/json".toMediaType()),
+                    ),
+                )
+            }
+            return page
+        }
+    }
+
     private fun pushJob(id: String, resultJson: String) = Job(
         id = id,
         spaceId = "s1",
@@ -118,19 +198,81 @@ class PushInboxTest {
     }
 
     @Test
-    fun firstRun_seeds_current_cursor_and_replays_nothing() = runTest {
+    fun firstRun_backfills_pushes_that_predate_first_sync_and_dedupes() = runTest {
+        // Stage 24: on first run (no persisted cursor) the inbox BACKFILLS from sync(null)
+        // instead of only seeding the cursor — a push that landed before the first sync lands.
         val store = FakeStore()
         val downloader = FakeDownloader()
-        val cursor = FakeCursorStore(value = null) // never seeded
-        val api = FakeApi(ArrayDeque(listOf(SyncResponse(jobs = emptyList(), cursor = "seed-cursor"))))
+        val cursor = FakeCursorStore(value = null) // fresh install: never seeded
+        val inbox = PushInbox(store, downloader)
+
+        // One of the two old pushes is already local (materialised on an earlier pass/pairing).
+        assertTrue(inbox.materialise(pushJob("seed", singlePageResult("c1"))))
+
+        val page = SyncResponse(
+            jobs = listOf(
+                pushJob("j1", singlePageResult("c1")), // already local → deduped
+                pushJob("j2", singlePageResult("c2")), // not local → materialised
+            ),
+            cursor = "c-new",
+        )
+        val api = FakeApi(ArrayDeque(listOf(page, page.copy(cursor = "c-new2"))))
+        val repo = DeviceRepository(api)
+
+        val first = inbox.poll(repo, cursor)
+        assertEquals("exactly one old push backfilled (the other was already local)", 1, first)
+        assertEquals("first run pages from sync(null)", null, api.cursorsSent.first())
+        assertEquals("cursor persisted from the backfilled page", "c-new", cursor.value)
+        assertEquals(2, store.canvases.size)
+
+        val second = inbox.poll(repo, cursor)
+        assertEquals("a second poll materialises nothing new (dedupe)", 0, second)
+        assertEquals("c-new2", cursor.value)
+    }
+
+    @Test
+    fun materialise_refreshes_an_expired_raster_url_and_downloads() = runTest {
+        // Stage 24 regression: a pushed job whose signed raster url has expired (server 403)
+        // still materialises — CachingBlobDownloader re-fetches a fresh url via getCanvas.
+        val store = FakeStore()
+        val cacheDir = File(System.getProperty("java.io.tmpdir"), "push-inbox-test-${System.nanoTime()}")
+        val freshUrl = "https://blob/c1?sig=fresh"
+        val page = SyncResponse(jobs = listOf(pushJob("j1", singlePageResult("c1"))), cursor = "c1cur")
+        val api = FakeBlobApi(page, freshUrl, "%PDF-1.4\n%stub\n".toByteArray())
+        val repo = DeviceRepository(api)
+        val inbox = PushInbox(store, CachingBlobDownloader({ repo }, cacheDir))
+        val cursor = FakeCursorStore(value = "c0")
+
+        try {
+            val n = inbox.poll(repo, cursor)
+            assertEquals("the expired-url job materialises after one refresh", 1, n)
+            assertEquals("blob fetched twice: stale (403) then fresh", 2, api.blobCalls)
+            assertEquals("one canvas-detail refresh for the fresh url", 1, api.canvasCalls)
+            assertEquals(1, store.canvases.size)
+            val cached = File(store.rasters.single().blobUri)
+            assertTrue("the refreshed blob is cached on disk", cached.exists() && cached.length() > 0)
+        } finally {
+            cacheDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun unknownCursor_422_reseeds_and_backfills() = runTest {
+        // Stage 24: a persisted cursor the server no longer knows (data reset) → 422 → the
+        // inbox re-seeds by restarting the loop from null (backfill) instead of failing.
+        val store = FakeStore()
+        val downloader = FakeDownloader()
+        val cursor = FakeCursorStore(value = "stale-cursor") // persisted but unknown to the server
+        val page = SyncResponse(jobs = listOf(pushJob("j1", singlePageResult("c1"))), cursor = "fresh-cursor")
+        val api = ReseedApi(page)
         val inbox = PushInbox(store, downloader)
 
         val n = inbox.poll(DeviceRepository(api), cursor)
 
-        assertEquals(0, n)
-        assertEquals("seed-cursor", cursor.value) // seeded with the CURRENT cursor
-        assertEquals(listOf<String?>(null), api.cursorsSent) // sync(null) only
-        assertTrue("no old history replayed", store.canvases.isEmpty())
+        assertEquals("re-seed then backfill materialises the pushed job", 1, n)
+        assertEquals("tried the stale cursor, then re-seeded from null", listOf<String?>("stale-cursor", null), api.cursorsSent)
+        assertEquals("cursor persisted from the backfilled page", "fresh-cursor", cursor.value)
+        assertEquals(1, store.canvases.size)
     }
 
     @Test
