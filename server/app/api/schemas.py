@@ -159,6 +159,27 @@ class CardOut(BaseModel):
     created_at: datetime
 
 
+class BrainEntryOut(BaseModel):
+    """``BrainEntry`` (SPEC §4) as returned by the frozen ``/brain/{space_slug}`` routes.
+
+    ``job_id`` is the Stage 25 additive field (ADR-0013), documented in the dated
+    device-api section: the to_agent job whose ``brain_writes`` produced the row, or
+    ``null`` for a device/card-created entry.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    space_slug: str
+    kind: str
+    text: str
+    tags: list[str]
+    source_canvas_id: uuid.UUID | None
+    source_region: dict | None
+    job_id: uuid.UUID | None
+    created_at: datetime
+
+
 class JobOut(BaseModel):
     id: uuid.UUID
     space_id: uuid.UUID

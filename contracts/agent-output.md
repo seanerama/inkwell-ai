@@ -71,3 +71,22 @@ These keys appear only for `canvas.formalize`; `canvas.annotate` / `canvas.ask` 
 are unchanged. Consumers that do not know them ignore them (they are optional siblings,
 exactly like `contract_version`). Because they are not part of the `AgentOutput` model,
 they are absent from `contracts/schema/agent-output.v1.schema.json`, which stays frozen.
+
+## Additive changes (v1) — 2026-09-21
+
+Stage 25 (ADR-0013 §2) adds one more **server-added sibling key** to a done `to_agent`
+job's `jobs.result`, alongside `contract_version` (and the Stage 12 `canvas`/
+`source_canvas_id` keys). This is not a change to the model's output shape and not a
+change to the frozen schema: the model still produces exactly `{ summary, annotations,
+cards, brain_writes }`, and `brain_writes` itself is unchanged. The key is written by the
+server after validation, never by the model.
+
+- **`brain_entry_ids`** — the ids of the `brain_entries` rows the server created from this
+  job's `brain_writes` (provenance/traceability; ADR-0013 §2). Skipped writes (exact-text
+  duplicates already live in the space) are not listed, so this can be shorter than
+  `brain_writes`. The key is present only when the `BRAIN_ENABLED` kill-switch is on;
+  with the switch off no writes are persisted and the key is absent.
+
+Because it is not part of the `AgentOutput` model it is absent from
+`contracts/schema/agent-output.v1.schema.json`, which stays frozen — exactly like
+`contract_version` and the Stage 12 keys.

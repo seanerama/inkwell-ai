@@ -18,7 +18,9 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_token
 from app.api.errors import ApiError
 from app.api.schemas import CardOut
-from app.db.models import CARD_STATES, Card, DeviceToken
+from app.brain.store import create_entry
+from app.config import get_settings
+from app.db.models import BRAIN_KINDS, CARD_STATES, Card, DeviceToken, Space
 
 router = APIRouter()
 
@@ -69,13 +71,50 @@ def patch_card(
     return CardOut.model_validate(card)
 
 
-@router.post("/cards/{card_id}/actions/{action_id}", response_model=CardOut)
+def _save_to_brain(db: Session, card: Card, action: dict) -> dict:
+    """Stage 25 (ADR-0013 §5): create a brain entry from the card, mark it ``done``.
+
+    Returns the card as today (``CardOut`` fields) plus a ``brain_entry_id`` sibling. The
+    entry's ``kind`` is the action payload's ``kind`` when it is one of the four brain
+    kinds, else ``fact``; its text is the card's title and body; tags come from the
+    payload; ``source_canvas_id`` from the parent job. Gated by ``BRAIN_ENABLED``.
+    """
+    payload = action.get("payload") or {}
+    kind = payload.get("kind")
+    if kind not in BRAIN_KINDS:
+        kind = "fact"
+    text = f"{card.title}\n\n{card.body}" if card.body else card.title
+    job = card.job
+    space = db.get(Space, job.space_id) if job is not None else None
+    if space is None:  # pragma: no cover - a card always has a job with a real space
+        raise ApiError(404, "not_found", "card has no space")
+
+    entry, _created = create_entry(
+        db,
+        space_slug=space.slug,
+        kind=kind,
+        text=text,
+        tags=payload.get("tags") or [],
+        source_canvas_id=job.canvas_id if job is not None else None,
+    )
+    if card.state != "done":
+        card.state = "done"
+    _bump_job(db, card)
+    db.commit()
+    db.refresh(card)
+    db.refresh(entry)
+    out = CardOut.model_validate(card).model_dump(mode="json")
+    out["brain_entry_id"] = str(entry.id)
+    return out
+
+
+@router.post("/cards/{card_id}/actions/{action_id}")
 def run_card_action(
     card_id: uuid.UUID,
     action_id: str,
     db: Session = Depends(get_db),
     _: DeviceToken = Depends(require_token),
-) -> CardOut:
+) -> dict:
     card = _get_card(db, card_id)
     action = next((a for a in (card.actions or []) if a.get("id") == action_id), None)
     if action is None:
@@ -86,7 +125,13 @@ def run_card_action(
         new_state = "done"
     elif kind == "reject":
         new_state = "dismissed"
-    elif kind in ("run_tool", "open_canvas", "save_to_brain"):
+    elif kind == "save_to_brain":
+        if not get_settings().brain_enabled:
+            raise ApiError(
+                422, "not_implemented", "action kind save_to_brain is not implemented yet"
+            )
+        return _save_to_brain(db, card, action)
+    elif kind in ("run_tool", "open_canvas"):
         raise ApiError(422, "not_implemented", f"action kind {kind} is not implemented yet")
     else:
         raise ApiError(422, "validation", f"unknown action kind {kind!r}")
@@ -96,4 +141,4 @@ def run_card_action(
         _bump_job(db, card)
         db.commit()
         db.refresh(card)
-    return CardOut.model_validate(card)
+    return CardOut.model_validate(card).model_dump(mode="json")

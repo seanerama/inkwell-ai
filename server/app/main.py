@@ -14,7 +14,18 @@ from app.api.errors import (
 )
 from app.api.middleware import ContractAndLoggingMiddleware
 from app.api.ratelimit import RateLimiter
-from app.api.routes import blobs, canvases, cards, health, jobs, push, spaces, sync, usage
+from app.api.routes import (
+    blobs,
+    brain,
+    canvases,
+    cards,
+    health,
+    jobs,
+    push,
+    spaces,
+    sync,
+    usage,
+)
 from app.config import get_settings
 from app.logging import configure_logging
 
@@ -33,7 +44,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.add_exception_handler(Exception, unhandled_error_handler)
 
-    for module in (health, spaces, jobs, cards, canvases, sync, usage, blobs, push):
+    for module in (health, spaces, jobs, cards, canvases, sync, usage, blobs, push, brain):
         app.include_router(module.router, prefix="/v1")
 
     return app

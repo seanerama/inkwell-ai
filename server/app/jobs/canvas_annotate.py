@@ -195,6 +195,20 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
 
     result = run.output.model_dump(by_alias=True)
     result["contract_version"] = CONTRACT_VERSION
+
+    # Stage 25 (ADR-0013 §2): persist the model's brain_writes into brain_entries with
+    # provenance, inside this same done transaction, and record the created ids as a
+    # server-added sibling (precedent: contract_version). The model's frozen brain_writes
+    # in `result` are unchanged. A persistence error propagates → the queue fails the job
+    # loudly (failed + error card), never a silent drop. Off = not persisted, no sibling.
+    # Runs BEFORE `_add_cards` so a persistence failure leaves the job with only its one
+    # error card (no half-written answer cards). Off = not persisted, no sibling.
+    if settings.brain_enabled:
+        from app.brain.store import persist_writes
+
+        ids = persist_writes(ctx.session, job, result["brain_writes"])
+        result["brain_entry_ids"] = [str(i) for i in ids]
+
     _add_cards(ctx, result["cards"])
 
     # canvas.formalize: the redraw becomes a new agent-origin canvas that rides back on

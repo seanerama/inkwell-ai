@@ -203,6 +203,16 @@ class BrainEntry(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    # Stage 25 (ADR-0013), additive migration 0006. Provenance + soft delete + dedupe.
+    # ``job_id`` is the to_agent job whose brain_writes produced the row (null for
+    # device/card-created rows). ``deleted_at`` soft-deletes (routes never return a
+    # deleted row). ``hash`` is sha256(lower(collapse_ws(text))) — see app/brain/store.py;
+    # a partial unique index on (space_slug, hash) WHERE deleted_at IS NULL dedupes live
+    # entries. The DB-only generated ``search`` tsvector column + its GIN index are
+    # created in the migration and are not mapped here (Postgres computes them).
+    job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
 class DeviceToken(Base):
