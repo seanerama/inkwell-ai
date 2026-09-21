@@ -5,6 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
@@ -141,11 +142,15 @@ class BrainInstrumentedTest {
     @Test
     fun list_renders_the_space_entries() {
         setContent(brainViewModel())
+        // The entry row is a `combinedClickable` Surface (a merging semantics node), so query it
+        // by its own `entry(id)` tag (the merged parent), not the inner text child's tag.
         composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag(BrainTags.entryText("b2")).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag(BrainTags.entry("b2")).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag(BrainTags.entryText("b2")).assertIsDisplayed()
-        composeRule.onNodeWithTag(BrainTags.entryText("b1")).assertIsDisplayed()
+        composeRule.onNodeWithTag(BrainTags.entry("b2")).assertIsDisplayed()
+        composeRule.onNodeWithTag(BrainTags.entry("b1")).assertIsDisplayed()
+        // The fact text is visible (merged into the row node).
+        composeRule.onNodeWithText("Q3 offsite: Austin, 14 Oct", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -162,7 +167,7 @@ class BrainInstrumentedTest {
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag(BrainTags.entry("b1")).fetchSemanticsNodes().isEmpty()
         }
-        composeRule.onNodeWithTag(BrainTags.entryText("b2")).assertIsDisplayed()
+        composeRule.onNodeWithTag(BrainTags.entry("b2")).assertIsDisplayed()
     }
 
     @Test
@@ -199,11 +204,13 @@ class BrainInstrumentedTest {
         composeRule.waitUntil(5_000) {
             recorded.any { it.method == "POST" && (it.path ?: "").startsWith("/v1/brain/work") }
         }
-        // The inserted row appears (its id is the server-assigned new id).
+        // The inserted row appears (its id is the server-assigned new id). Query the row by its
+        // own `entry(id)` tag — the merged parent — and confirm its text is visible.
         composeRule.waitUntil(5_000) {
-            composeRule.onAllNodesWithTag(BrainTags.entryText("new-100")).fetchSemanticsNodes().isNotEmpty()
+            composeRule.onAllNodesWithTag(BrainTags.entry("new-100")).fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithTag(BrainTags.entryText("new-100")).assertIsDisplayed()
+        composeRule.onNodeWithTag(BrainTags.entry("new-100")).assertIsDisplayed()
+        composeRule.onNodeWithText("Book the venue", substring = true).assertIsDisplayed()
     }
 }
 
