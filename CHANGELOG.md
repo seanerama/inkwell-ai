@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.18
+
+### Other
+- [stage 27] Brain on the device: per-space brain view, search and delete, Remember in the picker, save-to-brain cards (#64)
+- Stage 26: brain recall — baseline <brain_context> injection, brain_search tool, canvas.extract (#63)
+- Stage 25: brain store — persist brain_writes, frozen /brain routes with FTS, save_to_brain (#62)
+- Stage 29: inbox backfills on upgrade, surfaces poll errors, and guards poison jobs (#61)
+- Stage 28: make Settings/pairing reachable from the Library and never clipped on canvas (#60)
+- smoke: push-inbox multi-page row on v0.0.17 (folder appears after restart; fixture pages blank); STATUS note
+- Plan stages 28 (Settings reachable from Library, toolbar clipping) and 29 (inbox backfill on upgrade, visible poll errors, Resync)
+- Plan v0.7 Phase 5 (restored): stages 25 (brain store + routes), 26 (recall, brain_search tool, extract), 27 (device brain view); ADR-0013
+- Release v0.0.17: STATUS staging (stage 24 backfill shipped; smoke 3/3)
+
 ## 0.0.17
 
 ### Other
