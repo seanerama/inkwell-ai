@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.0.17
+
+### Other
+- Stage 24: inbox first run backfills pushes that predate the first sync (#57)
+- smoke: push-inbox results on v0.0.16 (owner pass; Phase 4 acceptance met)
+- Plan stage 24: inbox first-run backfill (pushes before first sync were skipped); STATUS note on tablet offline
+- Release v0.0.16: STATUS staging (Phase 4 push shipped; server and API smokes pass; tablet acceptance pending)
+
 ## 0.0.16
 
 ### Other

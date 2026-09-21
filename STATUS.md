@@ -3,12 +3,12 @@
 > Runtime/ops truth (framework-spec §4.6). Generated from `.verity/runtime.json`
 > by the Release/Deploy Operator. Secret LOCATIONS only — never values.
 
-**Live version:** 0.0.16
+**Live version:** 0.0.17
 **Deployed at:** 2026-09-16T19:29:06Z
-**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:d67d6867f0aaf347c0f63a5838c4965b51a7e7173c09cd47eb7cdf6aac806b0b (v0.0.15) + data set /srv/inkwell/backups/staging/20260918T224045Z-pre-deploy
+**Rollback from:** ghcr.io/seanerama/inkwell-ai-server@sha256:1f458930773d098228da88ddc6239c01270202d0c604f326e1449dfc90d46162 (v0.0.16) + data set /srv/inkwell/backups/staging/20260921T124646Z-pre-deploy
 
 ## Environments
-- **staging:** {"status":"deployed v0.0.16 by digest (v0.6 Phase 4: push origin, device inbox, agent push API); all three release lanes green; pre-deploy backup; canary passed; Playwright smoke 3/3; push-server and push-api smokes passed on the host; tablet acceptance (smoke/push-inbox.md) pending","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:1f458930773d098228da88ddc6239c01270202d0c604f326e1449dfc90d46162","deployed_at":"2026-09-18T22:42:03Z"}
+- **staging:** {"status":"deployed v0.0.17 by digest (stage 24: inbox first-run backfill; server code unchanged from v0.0.16); all three release lanes green; pre-deploy backup; canary passed; Playwright smoke run at ship","url":"https://mini-hp01.taile0ffc4.ts.net:8444","image":"ghcr.io/seanerama/inkwell-ai-server@sha256:a14c331d6f3cc29dc0b23046a4433e5ef8d3cf27832e22cd215e85ea30338a34","deployed_at":"2026-09-21T12:47:19Z"}
 - **prod:** {"status":"not deployed"}
 
 ## Secret locations (names + on-disk locations only, never values)
@@ -33,3 +33,4 @@
 - v0.0.16 (stages 21–23, Phase 4) deployed to staging 2026-09-18 by digest. Kill-switch flip: PUSH_ENABLED=true in staging .env (deliberate). Push-server smoke: CLI pushed a 1-page PDF to learning and a 3-page PDF to work; /sync shows both to_user jobs done; canvas detail returns a raster with a signed url; GET returns identical bytes (200), no bearer 401, bad sig 403. Push-api smoke: agent-kind token minted; POST /v1/push/document and /v1/push/canvas 201 over HTTPS; agent token on /sync 403, device token on push 403, no token 401. Four pushed canvases (learning: Q3 network plan; work: Three pages p1–p3 + Pushed over HTTP; home: Blank from API) are waiting for the tablet — owner runs smoke/push-inbox.md on the v0.0.16 APK. Prod NOT promoted.
 - 2026-09-21: owner installed v0.0.16 days after the pushes; nothing appeared. Tailscale shows the tablet offline (last seen ~21 h) and the API saw 0 requests in 48 h — the app never synced. Also by design the inbox seeds its cursor on first sync and skips earlier to_user jobs, so the 2026-09-18 pushes would be skipped anyway → bug stage 24 (53). Until it lands: tablet must be online and have synced once BEFORE a push for the badge to appear.
 - 2026-09-21: Phase 4 acceptance met on the tablet (v0.0.16): a CLI push landed within 10 s (sync + blob GET 200), the owner annotated the pushed PDF and Ask's answer referenced the plan's content. Multi-page folder and restart checks pending until stage 24's backfill surfaces the 2026-09-18 pushes.
+- v0.0.17 (stage 24, owner-built) deployed to staging 2026-09-21 by digest; server code identical to v0.0.16. Nightly timer backups confirmed on 09-19, 09-20, 09-21. Tablet check pending: after installing the v0.0.17 APK the five 2026-09-18 pushes (learning: Q3 network plan; work: Three pages p1–p3 + Pushed over HTTP; home: Blank from API) should backfill on first sync — completes the pending rows in smoke/push-inbox.md. Prod NOT promoted.
