@@ -74,6 +74,9 @@ fun CanvasScreen(
     // Stage 11: when the Library launched this canvas, Back returns to its folder. Null
     // in the flag-OFF path (there is nothing to go back to).
     onBack: (() -> Unit)? = null,
+    // Stage 27: opens the per-space Brain view (the "View in Brain" snackbar action after a
+    // save_to_brain). Null → the snackbar shows without the action (e.g. flag-OFF path).
+    onOpenBrain: (() -> Unit)? = null,
 ) {
     val config = LocalConfiguration.current
     val landscape = config.screenWidthDp >= config.screenHeightDp
@@ -156,6 +159,36 @@ fun CanvasScreen(
                         viewModel = viewModel,
                         modifier = Modifier.align(Alignment.TopStart).padding(12.dp),
                     )
+                }
+
+                // Stage 27: "Saved to brain" snackbar with a "View in Brain" action, shown after
+                // a save_to_brain card action succeeds. Auto-dismisses after a few seconds.
+                if (viewModel.brainEnabled && viewModel.brainSaved) {
+                    LaunchedEffect(Unit) {
+                        kotlinx.coroutines.delay(5_000)
+                        viewModel.consumeBrainSaved()
+                    }
+                    Surface(
+                        tonalElevation = 6.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(16.dp)
+                            .testTag(CanvasTags.BRAIN_SNACKBAR),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Text("Saved to brain")
+                            if (onOpenBrain != null) {
+                                TextButton(
+                                    onClick = { viewModel.consumeBrainSaved(); onOpenBrain() },
+                                    modifier = Modifier.testTag(CanvasTags.BRAIN_VIEW_ACTION),
+                                ) { Text("View in Brain") }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -317,8 +350,14 @@ private fun PanelCardRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 card.actions.forEachIndexed { ai, action ->
+                    // Stage 27: hide save_to_brain actions entirely when BuildConfig.BRAIN is off;
+                    // when on, they are live (the server returns 200 since stages 25/26).
+                    val hidden = action.kind == "save_to_brain" && !viewModel.brainEnabled
+                    if (hidden) return@forEachIndexed
                     val tag = CanvasTags.panelCardAction(index, ai)
-                    if (action.supported) {
+                    val actionable = action.supported ||
+                        (action.kind == "save_to_brain" && viewModel.brainEnabled)
+                    if (actionable) {
                         Button(
                             onClick = { viewModel.onCardAction(card, action) },
                             modifier = Modifier.testTag(tag),
@@ -409,6 +448,7 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                     // Job-type picker: Ask / Mark up (Stage 10), plus Formalize (Stage 12,
                     // behind BuildConfig.FORMALIZE). Extract / Action remain Phase 3+.
                     val formalize = viewModel.formalizeEnabled
+                    val brain = viewModel.brainEnabled
                     Text("Job type", fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SegmentedChoice(
@@ -428,10 +468,22 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                                 tag = CanvasTags.INSTRUCTION_FORMALIZE,
                             ) { viewModel.selectJobType("formalize") }
                         }
+                        // Stage 27: the fourth option — Remember (posts canvas.extract).
+                        if (brain) {
+                            SegmentedChoice(
+                                label = "Remember",
+                                selected = viewModel.jobType == "extract",
+                                tag = CanvasTags.INSTRUCTION_REMEMBER,
+                            ) { viewModel.selectJobType("extract") }
+                        }
                     }
-                    // The still-unimplemented Phase 3+ types stay greyed (minus Formalize
-                    // once its flag is on).
-                    val greyed = if (formalize) listOf("Extract", "Action") else listOf("Formalize", "Extract", "Action")
+                    // The still-unimplemented Phase 3+ types stay greyed (Formalize drops out
+                    // once its flag is on; Extract drops out once BuildConfig.BRAIN is on).
+                    val greyed = buildList {
+                        if (!formalize) add("Formalize")
+                        if (!brain) add("Extract")
+                        add("Action")
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         greyed.forEach { label ->
                             OutlinedButton(onClick = {}, enabled = false) { Text(label) }
@@ -756,6 +808,11 @@ object CanvasTags {
 
     // Stage 12 job-type picker: Formalize.
     const val INSTRUCTION_FORMALIZE = "canvas_instruction_formalize"
+
+    // Stage 27 job-type picker: Remember (canvas.extract) + the "Saved to brain" snackbar.
+    const val INSTRUCTION_REMEMBER = "canvas_instruction_remember"
+    const val BRAIN_SNACKBAR = "canvas_brain_snackbar"
+    const val BRAIN_VIEW_ACTION = "canvas_brain_view_action"
 
     fun color(index: Int) = "canvas_color_$index"
     fun panelCard(index: Int) = "canvas_panel_card_$index"

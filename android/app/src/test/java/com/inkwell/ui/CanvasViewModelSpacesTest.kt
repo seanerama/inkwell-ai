@@ -142,6 +142,9 @@ class CanvasViewModelSpacesTest {
         override suspend fun runCardAction(id: String, actionId: String): CardResponse = error("unused")
         override suspend fun getCanvas(id: String) = error("unused")
         override suspend fun downloadBlob(url: String) = error("unused")
+        override suspend fun getBrain(slug: String, q: String?, limit: Int?) = error("unused")
+        override suspend fun postBrain(slug: String, body: com.inkwell.net.BrainCreate) = error("unused")
+        override suspend fun deleteBrain(slug: String, id: String) = error("unused")
         private fun job(id: String, type: String, status: String, result: kotlinx.serialization.json.JsonObject?) = Job(
             id = id, spaceId = "space-work", canvasId = "canvas-1", direction = "to_agent", type = type,
             status = status, result = result, createdAt = "2026-09-16T00:00:00Z", updatedAt = "2026-09-16T00:00:01Z",

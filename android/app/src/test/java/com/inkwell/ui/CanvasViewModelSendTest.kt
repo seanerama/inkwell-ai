@@ -167,6 +167,9 @@ class CanvasViewModelSendTest {
         }
         override suspend fun getCanvas(id: String) = error("unused")
         override suspend fun downloadBlob(url: String) = error("unused")
+        override suspend fun getBrain(slug: String, q: String?, limit: Int?) = error("unused")
+        override suspend fun postBrain(slug: String, body: com.inkwell.net.BrainCreate) = error("unused")
+        override suspend fun deleteBrain(slug: String, id: String) = error("unused")
         val patched = mutableListOf<Pair<String, String>>()
         val actioned = mutableListOf<Pair<String, String>>()
         override suspend fun patchCard(id: String, body: CardStateRequest): CardResponse {
@@ -236,6 +239,7 @@ class CanvasViewModelSendTest {
         oneTapAsk: Boolean = true,
         cardActionsEnabled: Boolean = false,
         formalizeEnabled: Boolean = false,
+        brainEnabled: Boolean = false,
     ): CanvasViewModel {
         val layerDao = FakeLayerDao()
         val repo = CanvasRepository(
@@ -250,6 +254,7 @@ class CanvasViewModelSendTest {
             oneTapAsk = oneTapAsk,
             cardActionsEnabled = cardActionsEnabled,
             formalizeEnabled = formalizeEnabled,
+            brainEnabled = brainEnabled,
             formalizedCanvasStore = repo,
             ioDispatcher = dispatcher,
             exporter = fakeExporter,
@@ -313,6 +318,30 @@ class CanvasViewModelSendTest {
         assertEquals("canvas.ask", req.type)
         assertNull(req.instruction)
         assertFalse(wireBody(req).containsKey("instruction"))
+    }
+
+    @Test
+    fun remember_posts_canvas_extract() {
+        // Stage 27: the picker's fourth option (Remember, gated by BuildConfig.BRAIN) posts
+        // canvas.extract with the optional note, or none when blank.
+        val vm = viewModel(oneTapAsk = false, cardActionsEnabled = true, brainEnabled = true)
+        vm.selectJobType("extract")
+        assertEquals("extract", vm.jobType)
+        assertEquals("Remember", vm.sendLabel)
+
+        vm.onSendTapped()
+        val req = api.submitted.single()
+        assertEquals("canvas.extract", req.type)
+        assertNull("no note → instruction omitted", req.instruction)
+        assertEquals("canvas.extract", wireBody(req)["type"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun remember_is_not_selectable_when_brain_is_off() {
+        // With BuildConfig.BRAIN off the extract option is inert: selectJobType ignores it.
+        val vm = viewModel(oneTapAsk = false, cardActionsEnabled = true, brainEnabled = false)
+        vm.selectJobType("extract")
+        assertEquals("ask", vm.jobType)
     }
 
     @Test

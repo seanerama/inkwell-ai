@@ -1,7 +1,9 @@
 package com.inkwell.net
 
 import okhttp3.ResponseBody
+import retrofit2.Response
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.PATCH
 import retrofit2.http.POST
@@ -75,4 +77,30 @@ interface DeviceApi {
         @Path("id") id: String,
         @Path("action_id") actionId: String,
     ): CardResponse
+
+    // --- Stage 27: brain (contract device-api §Stage 25 additions; server-truth, ADR-0013 §6) ---
+
+    /**
+     * `GET /brain/{slug}?q=&limit=` → `BrainEntry[]`. With `q`, full-text matches ranked by
+     * relevance then recency; without `q`, the newest entries first. `limit` defaults to 50
+     * server-side (capped at 200). Never mirrored — the Brain view calls this live each time.
+     */
+    @GET("v1/brain/{slug}")
+    suspend fun getBrain(
+        @Path("slug") slug: String,
+        @Query("q") q: String? = null,
+        @Query("limit") limit: Int? = null,
+    ): List<BrainEntry>
+
+    /** `POST /brain/{slug}` (idempotent on normalised text) → the created/existing entry. */
+    @POST("v1/brain/{slug}")
+    suspend fun postBrain(@Path("slug") slug: String, @Body body: BrainCreate): BrainEntry
+
+    /**
+     * `DELETE /brain/{slug}/{id}` → `204` (soft delete). Declared `Response<Unit>` so the empty
+     * 204 body is not run through the JSON converter (Retrofit returns a null body for 204/205);
+     * [DeviceRepository.deleteBrain] maps a non-2xx to [ApiException].
+     */
+    @DELETE("v1/brain/{slug}/{id}")
+    suspend fun deleteBrain(@Path("slug") slug: String, @Path("id") id: String): Response<Unit>
 }
