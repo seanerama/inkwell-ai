@@ -92,6 +92,31 @@ class DeviceRepository(
     suspend fun runCardAction(cardId: String, actionId: String): CardResponse =
         apiCall { api.runCardAction(cardId, actionId) }
 
+    // --- Stage 27: brain (contract device-api §Stage 25 additions; server-truth, ADR-0013 §6) ---
+
+    /**
+     * List a space's brain entries (contract `GET /brain/{slug}`). [q] blank/null → newest
+     * first; non-blank → the full-text matches. HTTP failures surface as [ApiException]
+     * (e.g. `403 disabled` when `BRAIN_ENABLED` is off, `404 not_found` for an unknown slug).
+     */
+    suspend fun getBrain(slug: String, q: String? = null, limit: Int? = null): List<BrainEntry> =
+        apiCall { api.getBrain(slug, q, limit) }
+
+    /** Create a brain entry (contract `POST /brain/{slug}`; idempotent on normalised text). */
+    suspend fun postBrain(slug: String, body: BrainCreate): BrainEntry =
+        apiCall { api.postBrain(slug, body) }
+
+    /**
+     * Soft-delete a brain entry (contract `DELETE /brain/{slug}/{id}` → `204`). A non-2xx is
+     * mapped to [ApiException] via the error envelope (mirrors [apiCall]'s HttpException path).
+     */
+    suspend fun deleteBrain(slug: String, id: String) {
+        val resp = api.deleteBrain(slug, id)
+        if (!resp.isSuccessful) {
+            throw ApiException(resp.code(), ErrorEnvelopeParser.parse(resp.errorBody()?.string()))
+        }
+    }
+
     /**
      * Poll `/sync` on [pollIntervalMs] cadence until the job with [jobId] is terminal
      * (`done`/`failed`/`cancelled`), starting from [startCursor]. The server cursor is

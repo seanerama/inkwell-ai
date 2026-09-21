@@ -44,6 +44,9 @@ class SyncCursorTest {
         override suspend fun runCardAction(id: String, actionId: String) = error("unused")
         override suspend fun getCanvas(id: String) = error("unused")
         override suspend fun downloadBlob(url: String) = error("unused")
+        override suspend fun getBrain(slug: String, q: String?, limit: Int?) = error("unused")
+        override suspend fun postBrain(slug: String, body: BrainCreate) = error("unused")
+        override suspend fun deleteBrain(slug: String, id: String) = error("unused")
     }
 
     @Test

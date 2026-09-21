@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -77,6 +78,12 @@ fun LibraryScreen(
      * Library. Defaults to a no-op so existing call sites/tests that omit it still compile.
      */
     onOpenSettings: () -> Unit = {},
+    /**
+     * Stage 27: opens the per-space Brain view for a given space id. Called by the brain icon in
+     * the breadcrumb bar (active space) and the tab's ⋯ menu (that tab's space). Gated by
+     * `BuildConfig.BRAIN`; a no-op default keeps existing call sites/tests compiling.
+     */
+    onOpenBrain: (String) -> Unit = {},
     loadThumbnail: (CanvasEntity) -> ImageBitmap? = { null },
     /**
      * Stage 15: hosts the space-settings sheet + "new space" dialog. Null (default) keeps the
@@ -111,9 +118,11 @@ fun LibraryScreen(
                     onAddSpace = { settingsViewModel?.openCreate() },
                     // Stage 22: unread pushed-canvas badge per tab.
                     unseenBySpace = viewModel.unseenBySpace,
+                    // Stage 27: the tab's ⋯ menu → Brain (gated by BuildConfig.BRAIN).
+                    onOpenBrain = onOpenBrain,
                 )
             }
-            BreadcrumbBar(viewModel = viewModel, onOpenSettings = onOpenSettings)
+            BreadcrumbBar(viewModel = viewModel, onOpenSettings = onOpenSettings, onOpenBrain = onOpenBrain)
 
             if (viewModel.showTrash) {
                 TrashList(viewModel = viewModel)
@@ -245,7 +254,11 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun BreadcrumbBar(viewModel: LibraryViewModel, onOpenSettings: () -> Unit) {
+private fun BreadcrumbBar(
+    viewModel: LibraryViewModel,
+    onOpenSettings: () -> Unit,
+    onOpenBrain: (String) -> Unit = {},
+) {
     Surface(tonalElevation = 2.dp) {
         Row(
             modifier = Modifier
@@ -260,6 +273,14 @@ private fun BreadcrumbBar(viewModel: LibraryViewModel, onOpenSettings: () -> Uni
                     Text(" › ")
                     TextButton(onClick = { viewModel.navigateTo(index) }) { Text(folder.name) }
                 }
+            }
+            // Stage 27: the per-space Brain, one tap from the Library (beside Settings/Trash),
+            // gated by BuildConfig.BRAIN. Opens the Brain view for the ACTIVE space.
+            if (BuildConfig.BRAIN) {
+                IconButton(
+                    onClick = { viewModel.activeSpaceId?.let(onOpenBrain) },
+                    modifier = Modifier.testTag(LibraryTags.BRAIN),
+                ) { Icon(Icons.Filled.Star, contentDescription = "Brain") }
             }
             // Stage 28: Settings is one tap from the Library — a gear beside the Trash entry.
             IconButton(
@@ -578,6 +599,9 @@ object LibraryTags {
     const val SCREEN = "library_screen"
     const val BREADCRUMB = "library_breadcrumb"
     const val SETTINGS = "library_settings"
+
+    /** Stage 27: the Brain icon in the breadcrumb bar (gated by BuildConfig.BRAIN). */
+    const val BRAIN = "library_brain"
     const val FAB = "library_fab"
     const val NEW_CANVAS = "library_new_canvas"
     const val NEW_FOLDER = "library_new_folder"

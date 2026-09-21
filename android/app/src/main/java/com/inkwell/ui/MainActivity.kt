@@ -138,6 +138,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Stage 27: the per-space Brain view. Server-truth — it fetches live from GET /brain/{slug}
+    // and NEVER mirrors into Room (ADR-0013 §6). The canvas-existence check drives tap-to-open.
+    private val brainViewModel: BrainViewModel by viewModels {
+        val tokenStore = EncryptedTokenStore(applicationContext)
+        viewModelFactory {
+            initializer {
+                BrainViewModel(
+                    deviceRepositoryProvider = { LoopServices.repositoryFrom(tokenStore) },
+                    canvasExistsLocally = { id -> canvasRepository.spaceIdForCanvas(id) != null },
+                )
+            }
+        }
+    }
+
     private val libraryViewModel: LibraryViewModel by viewModels {
         val library = LibraryRepository(
             folderDao = db.folderDao(),
@@ -250,13 +264,30 @@ class MainActivity : ComponentActivity() {
     @androidx.compose.runtime.Composable
     private fun LibraryRoute(onOpenSettings: () -> Unit) {
         var selectedCanvasId by remember { mutableStateOf<String?>(null) }
+        // Stage 27: the space id whose Brain view is open (null = not in the Brain view).
+        var brainSpaceId by remember { mutableStateOf<String?>(null) }
 
         val openId = selectedCanvasId
-        if (openId == null) {
+        val brainId = brainSpaceId
+        if (BuildConfig.BRAIN && brainId != null) {
+            val space = libraryViewModel.spaces.firstOrNull { it.id == brainId }
+            BrainScreen(
+                viewModel = brainViewModel,
+                slug = space?.slug ?: "",
+                spaceName = space?.name ?: "Space",
+                onBack = { brainSpaceId = null },
+                onOpenCanvas = { canvasId ->
+                    brainSpaceId = null
+                    selectedCanvasId = canvasId
+                },
+            )
+        } else if (openId == null) {
             LibraryScreen(
                 viewModel = libraryViewModel,
                 onOpenCanvas = { selectedCanvasId = it },
                 onOpenSettings = onOpenSettings,
+                // Stage 27: open the per-space Brain (breadcrumb icon → active space; tab menu → that space).
+                onOpenBrain = { spaceId -> if (BuildConfig.BRAIN) brainSpaceId = spaceId },
                 settingsViewModel = spaceSettingsViewModel,
                 loadThumbnail = { canvas ->
                     val f = thumbnailRenderer.file(canvas.id)
@@ -284,6 +315,16 @@ class MainActivity : ComponentActivity() {
                 onBack = {
                     renderThumbnailAsync(openId)
                     selectedCanvasId = null
+                },
+                // Stage 27: "View in Brain" (after a save_to_brain) opens the active space's Brain.
+                onOpenBrain = if (BuildConfig.BRAIN) {
+                    {
+                        renderThumbnailAsync(openId)
+                        selectedCanvasId = null
+                        brainSpaceId = libraryViewModel.activeSpaceId
+                    }
+                } else {
+                    null
                 },
             )
         }

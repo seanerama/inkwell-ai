@@ -221,6 +221,45 @@ data class CanvasDetail(
     val rasters: List<WireRaster> = emptyList(),
 )
 
+// --- Stage 27: brain (contract device-api §Stage 25 additions; server-truth, ADR-0013 §6) ---
+
+/**
+ * A brain entry as the server returns it (contract `device-api` `GET /brain/{slug}` →
+ * `BrainEntry[]`). The full shape is `{ id, space_slug, kind, text, tags, source_canvas_id,
+ * source_region, job_id, created_at }` — `job_id` is the Stage-25 additive field (the
+ * `to_agent` job whose `brain_writes` produced the row, or null for a device/`save_to_brain`
+ * entry). `kind` is one of fact/task/reference/decision, kept as a wire string so an
+ * additive kind degrades gracefully. Defaults tolerate an older/partial server. The device
+ * NEVER mirrors this into Room — the Brain view fetches live every time (ADR-0013 §6).
+ */
+@Serializable
+data class BrainEntry(
+    val id: String,
+    @SerialName("space_slug") val spaceSlug: String = "",
+    val kind: String,
+    val text: String,
+    val tags: List<String> = emptyList(),
+    @SerialName("source_canvas_id") val sourceCanvasId: String? = null,
+    @SerialName("source_region") val sourceRegion: List<Double>? = null,
+    @SerialName("job_id") val jobId: String? = null,
+    @SerialName("created_at") val createdAt: String = "",
+)
+
+/**
+ * `POST /brain/{slug}` request body (contract device-api §Stage 25 additions,
+ * `{ kind, text (1–2000), tags?, source_canvas_id? }`). `tags`/`source_canvas_id` are
+ * nullable so `explicitNulls=false` (ApiClient's Json) omits the unset keys. The route is
+ * idempotent server-side: a live entry with the same normalised text returns `200` with the
+ * existing row rather than creating a duplicate.
+ */
+@Serializable
+data class BrainCreate(
+    val kind: String,
+    val text: String,
+    val tags: List<String>? = null,
+    @SerialName("source_canvas_id") val sourceCanvasId: String? = null,
+)
+
 /** The error envelope `{ "error": { "code", "message" } }` (contract device-api). */
 @Serializable
 data class ErrorEnvelope(

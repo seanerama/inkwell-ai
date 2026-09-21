@@ -140,6 +140,17 @@ android {
             // the server push routes are additionally gated by PUSH_ENABLED (stage 21, default
             // OFF). Flip to "false" to restore the pre-Stage-22 behaviour without a code change.
             buildConfigField("boolean", "PUSH_INBOX", "true")
+            // Brain kill-switch (Stage 27 feature flag, THIS stage's feature): ON adds the
+            // per-space Brain view (list / search / delete-with-undo / add, fetched LIVE from
+            // GET /brain/{slug} — never mirrored, ADR-0013 §6), the **Remember** picker option
+            // (posts canvas.extract), and working **save_to_brain** card actions. OFF = no brain
+            // icon/menu, no Remember option, and save_to_brain actions are hidden (the app
+            // behaves exactly as before). Documented release-ON exception (same rationale as
+            // ONE_TAP_ASK/…/PUSH_INBOX): default ON in debug AND release, because prod is not
+            // promoted, staging is the only environment, and the server brain routes are
+            // additionally gated by BRAIN_ENABLED (stage 25, default OFF → 403). Flip to "false"
+            // to hide all brain surfaces without a code change.
+            buildConfigField("boolean", "BRAIN", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -187,6 +198,11 @@ android {
             // badges and leave the raster rendering code inert, without a code change. The
             // server push routes are additionally gated by PUSH_ENABLED (stage 21, default OFF).
             buildConfigField("boolean", "PUSH_INBOX", "true")
+            // Stage 27 Brain: ON in release by documented exception (see the debug block and the
+            // stage-27 spec). Flip to "false" to hide the Brain view, the Remember picker option,
+            // and the save_to_brain card actions without a code change. The server brain routes
+            // are additionally gated by BRAIN_ENABLED (stage 25, default OFF → 403 disabled).
+            buildConfigField("boolean", "BRAIN", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

@@ -72,6 +72,12 @@ class CanvasViewModel(
      */
     val formalizeEnabled: Boolean = BuildConfig.FORMALIZE,
     /**
+     * Stage 27 kill-switch: ON → the picker offers **Remember** (posts `canvas.extract`) and
+     * `save_to_brain` card actions are live (the server returns 200 since stages 25/26); OFF →
+     * the Remember option is hidden and `save_to_brain` actions are hidden. Default [BuildConfig.BRAIN].
+     */
+    val brainEnabled: Boolean = BuildConfig.BRAIN,
+    /**
      * Stage 14 kill-switch: ON → jobs are posted with the CURRENT canvas's `space_id`
      * (server-mirrored, ADR-0010) and agent marks use the space's accent; OFF → the legacy
      * single-space behaviour (resolve the "work" space by slug on send). Default [BuildConfig.SPACES].
@@ -229,6 +235,7 @@ class CanvasViewModel(
             !online -> "Offline"
             cardActionsEnabled && jobType == "annotate" -> "Mark up"
             cardActionsEnabled && jobType == "formalize" -> "Formalize"
+            cardActionsEnabled && jobType == "extract" -> "Remember"
             else -> "Send"
         }
 
@@ -244,6 +251,13 @@ class CanvasViewModel(
 
     /** The card index the panel should expand + scroll to after a canvas mark tap. */
     var selectedCardIndex by mutableStateOf<Int?>(null)
+        private set
+
+    /**
+     * Stage 27: set true after a `save_to_brain` card action succeeds so [CanvasScreen] shows a
+     * "Saved to brain" snackbar with a "View in Brain" action. Consumed by [consumeBrainSaved].
+     */
+    var brainSaved by mutableStateOf(false)
         private set
 
     /** Monotonic token so a newer card tap cancels an older pulse's auto-clear. */
@@ -476,13 +490,17 @@ class CanvasViewModel(
     private fun sanitizeJobType(type: String): String = when (type) {
         "annotate" -> "annotate"
         "formalize" -> if (formalizeEnabled) "formalize" else "ask"
+        "extract" -> if (brainEnabled) "extract" else "ask"
         else -> "ask"
     }
 
-    /** Stage 10 picker: remember the choice; the Send label follows it (Stage 12 adds formalize). */
+    /** Stage 10 picker: remember the choice; the Send label follows it (Stage 12/27 add formalize/extract). */
     fun selectJobType(type: String) {
-        // ask/annotate always allowed; formalize only behind its flag; extract/action Phase 3+.
-        if (type != "ask" && type != "annotate" && !(type == "formalize" && formalizeEnabled)) return
+        // ask/annotate always allowed; formalize behind its flag; extract (Remember) behind BRAIN; action Phase 3+.
+        val allowed = type == "ask" || type == "annotate" ||
+            (type == "formalize" && formalizeEnabled) ||
+            (type == "extract" && brainEnabled)
+        if (!allowed) return
         jobType = type
         saveJobType(type)
     }
@@ -499,6 +517,9 @@ class CanvasViewModel(
                 submit(type = "canvas.annotate", instr = instruction.trim().ifBlank { PRESET_INSTRUCTION })
             "formalize" ->
                 submit(type = "canvas.formalize", instr = instruction.trim().ifBlank { null })
+            "extract" ->
+                // Stage 27 "Remember": read the canvas and record durable facts as brain_writes.
+                submit(type = "canvas.extract", instr = instruction.trim().ifBlank { null })
             else ->
                 submit(type = "canvas.ask", instr = instruction.trim().ifBlank { null })
         }
@@ -730,7 +751,10 @@ class CanvasViewModel(
      * the optimistic change is reverted. Unsupported kinds and the OFF kill-switch no-op.
      */
     fun onCardAction(card: PanelCard, action: PanelAction) {
-        if (!cardActionsEnabled || !action.supported || card.id.isEmpty()) return
+        // Stage 27: `save_to_brain` is actionable when BuildConfig.BRAIN is on (server returns 200
+        // since stages 25/26); confirm/reject remain the always-supported kinds.
+        val actionable = action.supported || (action.kind == "save_to_brain" && brainEnabled)
+        if (!cardActionsEnabled || !actionable || card.id.isEmpty()) return
         val dev = deviceRepositoryProvider() ?: run {
             sendStatus = "Not paired — set the server URL and token in Settings."
             return
@@ -744,6 +768,8 @@ class CanvasViewModel(
                 val updated = dev.runCardAction(card.id, action.id)
                 updatePanelCardState(updated.id, updated.state)
                 persistCardState(updated.id, updated.state)
+                // Stage 27: the card now shows its server "done"/"Saved" state; signal the snackbar.
+                if (action.kind == "save_to_brain") brainSaved = true
             } catch (e: Exception) {
                 // Reconcile back to the pre-tap state (the server rejected or is unreachable).
                 updatePanelCardState(card.id, previous)
@@ -824,6 +850,9 @@ class CanvasViewModel(
 
     /** The UI calls this once it has expanded/scrolled to [selectedCardIndex]. */
     fun onCardSelectionConsumed() { selectedCardIndex = null }
+
+    /** Stage 27: the UI calls this once it has shown the "Saved to brain" snackbar. */
+    fun consumeBrainSaved() { brainSaved = false }
 
     /** Flush offline-created jobs in insertion order when connectivity returns. */
     private fun flushOfflineQueue() {
