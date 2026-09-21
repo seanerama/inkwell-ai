@@ -141,8 +141,8 @@ That is the bug this scenario proves is fixed.
 | Opening clears the **New** dot and the **tab badge** | pass (owner) |
 | Layer tray shows a **Document** layer whose toggle hides/shows the page | not reported (owner did not exercise) |
 | Writing lands **on top** of the document; **Ask** answer references the document | pass — owner annotated the plan and the Ask answer referenced its content (Phase 4 acceptance met) |
-| 3-page push → **folder** "Report" with three **"Report — pN"** pages | pending — the 2026-09-18 three-page push predates the tablet's first sync (stage 24 backfill) |
-| Page 2 renders the **second** PDF page | pending (see above) |
+| 3-page push → **folder** "Report" with three **"Report — pN"** pages | pass (v0.0.17, 2026-09-21: folder "Three pages" with p1–p3 appeared after an app restart; pages blank because the fixture PDF has no content) |
+| Page 2 renders the **second** PDF page | inconclusive — fixture pages are empty; retest with a real multi-page PDF (stage 29) |
 | Restart: canvases persist; re-refresh makes **no duplicates** | not reported |
 | **Stage 24 backfill:** the five pushes from 2026-09-18 (predating the tablet's first sync) all appear after upgrading to the fixed APK, with expired links re-fetched and no duplicates | pending — verify on the fixed build (worked example: owner's five 2026-09-18 pushes) |
 | Screenshots A–F attached | none |
