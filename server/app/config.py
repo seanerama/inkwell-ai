@@ -91,6 +91,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("BRAIN_ENABLED", "INKWELL_BRAIN_ENABLED"),
     )
 
+    # Stage 26 kill-switch (default OFF, ADR-0013 §3-§5). When false, the agent tool
+    # loop is never entered: `tools` is never sent to the Messages API even when a space
+    # lists them, and the call stays byte-identical to today's. Gates the tool loop only;
+    # `BRAIN_ENABLED` still independently gates <brain_context> injection. Accepts a bare
+    # ``AGENT_TOOLS_ENABLED`` in addition to the ``INKWELL_``-prefixed form.
+    agent_tools_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("AGENT_TOOLS_ENABLED", "INKWELL_AGENT_TOOLS_ENABLED"),
+    )
+
     env: str = "dev"
 
     # NOTE: ANTHROPIC_API_KEY is intentionally NOT a field here. The anthropic SDK

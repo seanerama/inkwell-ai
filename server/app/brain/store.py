@@ -17,7 +17,7 @@ import hashlib
 import re
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session
 
 from app.db.models import BrainEntry, Job, Space
@@ -97,6 +97,36 @@ def create_entry(
     session.add(entry)
     session.flush()
     return entry, True
+
+
+def search_entries(
+    session: Session, space_slug: str, query: str | None, *, limit: int = 10
+) -> list[BrainEntry]:
+    """Ranked full-text search over a space's live entries (Stage 25's route query).
+
+    Mirrors ``GET /brain/{space_slug}`` exactly: ``websearch_to_tsquery('english', q)``
+    ranked by ``ts_rank_cd`` with recency as the tiebreak. With no (or blank) ``query``,
+    returns the newest live entries. Soft-deleted rows are never returned. This is the
+    single search used by both baseline recall (``retrieve_brain``) and the
+    ``brain_search`` tool, so the two rank identically to the device route.
+    """
+    stmt = (
+        select(BrainEntry)
+        .where(BrainEntry.space_slug == space_slug)
+        .where(BrainEntry.deleted_at.is_(None))
+    )
+    q = (query or "").strip()
+    if q:
+        tsquery = func.websearch_to_tsquery("english", q)
+        search = literal_column("search")
+        stmt = (
+            stmt.where(search.op("@@")(tsquery))
+            .order_by(func.ts_rank_cd(search, tsquery).desc(), BrainEntry.created_at.desc())
+            .limit(limit)
+        )
+    else:
+        stmt = stmt.order_by(BrainEntry.created_at.desc()).limit(limit)
+    return list(session.execute(stmt).scalars().all())
 
 
 def persist_writes(session: Session, job: Job, writes: list[dict]) -> list[uuid.UUID]:

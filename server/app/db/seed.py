@@ -55,6 +55,10 @@ BUSINESS_PROMPT = (
     "tied to the numbers rather than to gut feel."
 )
 
+# Stage 26: every default space allows the brain_search tool (per-space allow-list,
+# ADR-0013 §5). The tool loop is still gated by AGENT_TOOLS_ENABLED at runtime.
+_DEFAULT_TOOLS = ["brain_search"]
+
 DEFAULT_SPACES = [
     {
         "slug": "work",
@@ -62,6 +66,7 @@ DEFAULT_SPACES = [
         "color": "#2F6FED",
         "position": 0,
         "system_prompt": WORK_PROMPT,
+        "tools": _DEFAULT_TOOLS,
     },
     {
         "slug": "home",
@@ -69,6 +74,7 @@ DEFAULT_SPACES = [
         "color": "#2FA84F",
         "position": 1,
         "system_prompt": HOME_PROMPT,
+        "tools": _DEFAULT_TOOLS,
     },
     {
         "slug": "learning",
@@ -76,6 +82,7 @@ DEFAULT_SPACES = [
         "color": "#8A4FED",
         "position": 2,
         "system_prompt": LEARNING_PROMPT,
+        "tools": _DEFAULT_TOOLS,
     },
     {
         "slug": "business",
@@ -83,6 +90,7 @@ DEFAULT_SPACES = [
         "color": "#ED8A2F",
         "position": 3,
         "system_prompt": BUSINESS_PROMPT,
+        "tools": _DEFAULT_TOOLS,
     },
 ]
 
@@ -93,7 +101,10 @@ def seed_default_spaces(session: Session) -> int:
     Returns the number of rows **inserted** (a backfill is never counted as created).
     For an existing default-slug row whose stored ``system_prompt`` is empty or all
     whitespace, the default prompt is filled in; a row with a non-empty prompt (a user
-    edit) is never overwritten. A second run therefore inserts 0 and changes nothing.
+    edit) is never overwritten. Stage 26 adds the same rule for ``tools``: an existing
+    default row whose ``tools`` is empty is backfilled with the default allow-list, but a
+    row whose tools were edited (non-empty) is left alone. A second run therefore inserts
+    0 and changes nothing.
     """
     existing = {row.slug: row for row in session.execute(select(Space)).scalars().all()}
     created = 0
@@ -107,13 +118,17 @@ def seed_default_spaces(session: Session) -> int:
                     color=spec["color"],
                     position=spec["position"],
                     system_prompt=spec["system_prompt"],
-                    tools=[],
+                    tools=list(spec["tools"]),
                     model="claude-sonnet-5",
                 )
             )
             created += 1
-        elif not (row.system_prompt or "").strip():
-            # Backfill an empty prompt; never overwrite a user edit. Not a "create".
-            row.system_prompt = spec["system_prompt"]
+        else:
+            if not (row.system_prompt or "").strip():
+                # Backfill an empty prompt; never overwrite a user edit. Not a "create".
+                row.system_prompt = spec["system_prompt"]
+            if not (row.tools or []):
+                # Backfill empty tools only (stage 13 rule); never overwrite an edit.
+                row.tools = list(spec["tools"])
     session.commit()
     return created
