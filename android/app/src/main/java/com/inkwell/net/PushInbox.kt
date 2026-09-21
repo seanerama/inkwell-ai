@@ -25,27 +25,39 @@ class PushInbox(
 ) {
 
     /**
-     * One discovery pass. On first run (no persisted cursor) SEED the cursor with the
-     * server's current one (`sync(null).cursor`) and return WITHOUT materialising, so old
-     * history is not replayed. Otherwise page from the persisted cursor: materialise every
-     * `to_user`/`done` job, then advance the cursor to the page's cursor — advancing ONLY
-     * after the whole page materialised (a throw leaves the cursor where it was, so the page
-     * is retried and dedupe skips what already landed). A full page (100) means loop again.
+     * One discovery pass. Page from the persisted cursor, which is null on first run (fresh
+     * install, reinstall, upgrade, new pairing) — in that case start at `sync(null)` (the most
+     * recent 100 jobs, ascending) and BACKFILL, so a `to_user` push that landed before the
+     * app's first successful sync is materialised rather than silently skipped (Stage 24).
+     * Materialise every `to_user`/`done` job whose canvases are not already local (dedupe via
+     * [PushedCanvasStore.canvasExists]), then advance the cursor to the page's cursor —
+     * advancing ONLY after the whole page materialised (a throw leaves the cursor where it
+     * was, so the page is retried and dedupe skips what already landed). A full page (100)
+     * means loop again.
+     *
+     * If the persisted cursor is unknown to the server (a `422` — e.g. the server's job data
+     * was reset), RE-SEED by restarting the loop from `null` (backfill) rather than failing.
+     * Any other error (network/offline) propagates so the caller keeps state and retries.
      *
      * Returns the number of jobs materialised this pass.
      */
     suspend fun poll(repo: DeviceRepository, cursorStore: SyncCursorStore): Int {
-        val seeded = cursorStore.get()
-        if (seeded == null) {
-            // First run: seed with the current cursor so pre-existing jobs are not replayed.
-            cursorStore.set(repo.sync(null).cursor)
-            return 0
-        }
-
-        var cursor = seeded
+        var cursor: String? = cursorStore.get() // null on first run → backfill from the start
+        var reseeded = false
         var materialised = 0
         while (true) {
-            val resp = repo.sync(cursor)
+            val resp = try {
+                repo.sync(cursor)
+            } catch (e: ApiException) {
+                // Unknown/stale persisted cursor (server data reset): re-seed once by
+                // restarting the loop from null (backfill). Everything else propagates.
+                if (e.statusCode == UNKNOWN_CURSOR_STATUS && cursor != null && !reseeded) {
+                    reseeded = true
+                    cursor = null
+                    continue
+                }
+                throw e
+            }
             for (job in resp.jobs) {
                 if (job.direction == "to_user" && job.status == "done") {
                     if (materialise(job)) materialised++
@@ -53,7 +65,7 @@ class PushInbox(
             }
             // Advance ONLY after the whole page materialised without throwing.
             cursor = resp.cursor
-            cursorStore.set(cursor)
+            cursorStore.set(resp.cursor)
             if (resp.jobs.size < PAGE_SIZE) break
         }
         return materialised
@@ -160,6 +172,12 @@ class PushInbox(
     companion object {
         /** Sync page size (contract device-api §Sync cursor: at most 100 per page). */
         const val PAGE_SIZE = 100
+
+        /**
+         * HTTP status the server returns for an unknown/invalid `/sync` cursor (contract
+         * device-api: `422` validation). Treated as "re-seed and backfill" in [poll].
+         */
+        const val UNKNOWN_CURSOR_STATUS = 422
 
         /** Ignore-unknown-keys reader for the `to_user` result envelope. */
         val defaultJson = Json { ignoreUnknownKeys = true; isLenient = true }

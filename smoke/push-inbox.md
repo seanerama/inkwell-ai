@@ -99,6 +99,38 @@ SSH (`ssh mini-hp01`).
    - *Expected:* **no duplicate** canvases or folders appear (dedupe by canvas id; the cursor
      was advanced after the first materialise).
 
+## Scenario 4 — first-run backfill: pushes that predate the app's first sync (Stage 24)
+
+Regression for the Stage-24 fix: before this fix a first run (fresh install, reinstall,
+upgrade, or a new pairing) only *seeded* the sync cursor and returned without materialising,
+so any `to_user` push that arrived **before** the app's first successful sync was silently
+lost. Now the first run **backfills** from `sync(null)` (the most recent 100 jobs) and
+materialises every pushed canvas not already on the device; old pushes whose signed raster
+links have expired still land (the download re-fetches a fresh `url` from `GET /canvases/{id}`
+on a 403).
+
+**Worked example — the owner's five pending pushes from 2026-09-18.** On 2026-09-21 the owner
+installed v0.0.16 three days after five documents had been pushed to a space and saw nothing.
+That is the bug this scenario proves is fixed.
+
+1. **Set up the missed pushes.** From the host, push several documents to a space *while the
+   target device is NOT paired / not yet installed* (or before its first sync), e.g.:
+   ```
+   ssh mini-hp01 'cd /srv/inkwell/staging && for f in doc1.pdf doc2.pdf doc3.pdf doc4.pdf doc5.pdf; do \
+     cat $f | dc run --rm -T api inkwell push document --space learning --file - --title "$f"; done'
+   ```
+   - *Expected:* five `job:`/`canvas:` lines. These are now "old" pushes (before any sync).
+2. **Install the fixed APK and pair** (fresh install / upgrade). Open the app on the Library.
+   Wait for the first poll (60 s foreground, or pull-to-refresh to force it).
+   - *Expected:* the **Learning** tab shows a badge counting **all five** backfilled canvases;
+     opening the space lists the five documents, each with a **New** dot. No push is missed.
+3. **Expired links still land.** If more than ~24 h elapsed since the push (the owner's case:
+   three days), the original signed raster links are expired; opening each canvas still renders
+   the PDF page (the blob was re-fetched via `GET /canvases/{id}` on a 403). Confirm every page
+   renders — none is blank.
+4. **No duplicates on re-sync.** Pull-to-refresh again: no duplicate canvases (dedupe by canvas
+   id; the cursor was advanced only after the page materialised).
+
 ## Handoff result (fill in)
 
 | Check | Result |
@@ -112,6 +144,7 @@ SSH (`ssh mini-hp01`).
 | 3-page push → **folder** "Report" with three **"Report — pN"** pages | pending — the 2026-09-18 three-page push predates the tablet's first sync (stage 24 backfill) |
 | Page 2 renders the **second** PDF page | pending (see above) |
 | Restart: canvases persist; re-refresh makes **no duplicates** | not reported |
+| **Stage 24 backfill:** the five pushes from 2026-09-18 (predating the tablet's first sync) all appear after upgrading to the fixed APK, with expired links re-fetched and no duplicates | pending — verify on the fixed build (worked example: owner's five 2026-09-18 pushes) |
 | Screenshots A–F attached | none |
 
 ## Notes

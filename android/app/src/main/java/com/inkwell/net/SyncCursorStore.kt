@@ -5,9 +5,9 @@ import android.content.Context
 /**
  * Persists the `/sync` cursor (contract `device-api` §Sync cursor) so the device keeps
  * discovering pushed `to_user` jobs across process restarts (Stage 22). The cursor is an
- * opaque, non-empty server string; a null return means "never seeded", which is the
- * signal to seed on first run with the *current* cursor (`sync(null).cursor`) so old
- * history is not replayed.
+ * opaque, non-empty server string; a null return means "never seeded", which is the signal
+ * to BACKFILL on first run — page from `sync(null)` (the most recent 100 jobs) so a push
+ * that landed before the app's first successful sync is materialised, not skipped (Stage 24).
  *
  * A pure interface so [PushInbox] is JVM-unit-testable with an in-memory fake; the app
  * backs it with plain SharedPreferences ([PrefsSyncCursorStore]) — the cursor is not a

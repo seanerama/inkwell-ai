@@ -46,8 +46,10 @@ class PushInboxInstrumentedTest {
     private lateinit var cacheDir: File
 
     private val canvasId = "srv-pushed-1"
+    private val canvasId2 = "srv-pushed-2"
     private val spaceId = "space-1"
     private val jobId = "job-push-1"
+    private val jobId2 = "job-push-2"
     private val blobPath = "/v1/blobs/push/abc.pdf"
 
     private class InMemoryTokenStore(private val base: String) : TokenStore {
@@ -73,6 +75,25 @@ class PushInboxInstrumentedTest {
         return """{"jobs":[{"id":"$jobId","space_id":"$spaceId","canvas_id":"$canvasId","direction":"to_user","type":"agent.push_document","status":"done","request":{},"result":$result,"created_at":"2026-09-18T00:00:00Z","updated_at":"2026-09-18T00:00:01Z"}],"cursor":"c1"}"""
     }
 
+    /** One `to_user` job for [cvId]/[rId], blob served from [blobUrl] (Stage 24 backfill body). */
+    private fun pushedJob(jId: String, cvId: String, rId: String, layerId: String, blobUrl: String): String {
+        val result = """
+            {"canvas":{"id":"$cvId","space_id":"$spaceId","title":"Brief","width_cu":2480,"height_cu":3508,"origin":"agent"},
+             "canvases":[{"id":"$cvId","space_id":"$spaceId","title":"Brief","width_cu":2480,"height_cu":3508,"origin":"agent"}],
+             "layers":[{"id":"$layerId","canvas_id":"$cvId","z":-1,"owner":"agent","type":"raster","job_id":"$jId"}],
+             "rasters":[{"id":"$rId","layer_id":"$layerId","url":"$blobUrl","mime":"application/pdf","page":0,"x_cu":0,"y_cu":0,"w_cu":2480,"h_cu":3508}],
+             "cards":[]}
+        """.trimIndent().replace("\n", "")
+        return """{"id":"$jId","space_id":"$spaceId","canvas_id":"$cvId","direction":"to_user","type":"agent.push_document","status":"done","request":{},"result":$result,"created_at":"2026-09-18T00:00:00Z","updated_at":"2026-09-18T00:00:01Z"}"""
+    }
+
+    /** Fresh-install backfill: `sync` WITHOUT a cursor returns two pre-existing pushed jobs. */
+    private fun backfillPageBody(base: String): String {
+        val j1 = pushedJob(jobId, canvasId, "raster-1", "layer-r1", base + "v1/blobs/push/abc.pdf")
+        val j2 = pushedJob(jobId2, canvasId2, "raster-2", "layer-r2", base + "v1/blobs/push/def.pdf")
+        return """{"jobs":[$j1,$j2],"cursor":"c1backfill"}"""
+    }
+
     @Before
     fun setUp() {
         server = MockWebServer()
@@ -86,6 +107,10 @@ class PushInboxInstrumentedTest {
                     // cursor manually, so the first real poll asks with cursor=c0 → the page.
                     path.startsWith("/v1/sync") && path.contains("cursor=c0") ->
                         MockResponse().setResponseCode(200).setBody(syncPageBody(base() + "v1/blobs/push/abc.pdf"))
+                    // Fresh install: the first poll has no persisted cursor, so `sync` is called
+                    // WITHOUT a cursor query → backfill the two pre-existing pushes (Stage 24).
+                    path.startsWith("/v1/sync") && !path.contains("cursor=") ->
+                        MockResponse().setResponseCode(200).setBody(backfillPageBody(base()))
                     path.startsWith("/v1/sync") ->
                         MockResponse().setResponseCode(200).setBody("""{"jobs":[],"cursor":"c1"}""")
                     path.startsWith("/v1/blobs/") -> {
@@ -147,5 +172,47 @@ class PushInboxInstrumentedTest {
         assertEquals(1, library.unseenPushedCount(spaceId))
         library.markSeen(canvasId)
         assertEquals(0, library.unseenPushedCount(spaceId))
+    }
+
+    @Test
+    fun freshInstall_backfills_two_pushed_canvases_with_badges() = runBlocking {
+        // Stage 24: a fresh install (empty cursor store) must BACKFILL — `sync` is called
+        // without a cursor and both pre-existing pushes land in Room with the badge count.
+        val store = RoomPushedCanvasStore(db.canvasDao(), db.layerDao(), db.folderDao(), db.rasterDao())
+        val downloader = CachingBlobDownloader({ deviceRepository }, cacheDir)
+        val inbox = PushInbox(store, downloader)
+        val library = LibraryRepository(db.folderDao(), db.canvasDao(), db.layerDao())
+
+        // Empty cursor store (get() == null): the first poll backfills from sync(null).
+        val cursor = object : com.inkwell.net.SyncCursorStore {
+            var v: String? = null
+            override fun get() = v
+            override fun set(cursor: String) { v = cursor }
+        }
+
+        val materialised = inbox.poll(deviceRepository, cursor)
+        assertEquals("both pre-existing pushes backfilled", 2, materialised)
+        assertEquals("cursor persisted after backfill", "c1backfill", cursor.v)
+
+        // Both canvases landed in Room, agent-origin and unread.
+        val c1 = db.canvasDao().byId(canvasId)
+        val c2 = db.canvasDao().byId(canvasId2)
+        assertNotNull(c1)
+        assertNotNull(c2)
+        assertEquals("agent", c1!!.origin)
+        assertEquals("agent", c2!!.origin)
+        assertNull(c1.seenAt)
+        assertNull(c2.seenAt)
+
+        // Both blobs cached on disk.
+        for (cv in listOf(canvasId, canvasId2)) {
+            val rasterLayer = db.layerDao().forCanvas(cv).single { it.type == "raster" }
+            val raster = db.rasterDao().forLayer(rasterLayer.id).single()
+            val cached = File(raster.blobUri)
+            assertTrue("cached blob exists for $cv", cached.exists() && cached.length() > 0)
+        }
+
+        // Badge: two unread pushed canvases in the space.
+        assertEquals(2, library.unseenPushedCount(spaceId))
     }
 }
