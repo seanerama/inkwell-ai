@@ -15,6 +15,7 @@ import com.inkwell.data.LibraryRepository
 import com.inkwell.data.SpaceEntity
 import com.inkwell.data.SpaceSync
 import com.inkwell.net.DeviceRepository
+import com.inkwell.net.InboxMaterialiseException
 import com.inkwell.net.PushInbox
 import com.inkwell.net.SyncCursorStore
 import kotlinx.coroutines.delay
@@ -61,6 +62,10 @@ class LibraryViewModel(
 
     /** Stage 22: ids of unread pushed canvases in the current space (drives the tile "New" dot). */
     var unseenCanvasIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /** Stage 29: the last push-inbox poll outcome (last poll time, count, error, skips) for Settings. */
+    var inboxStatus by mutableStateOf(InboxStatus())
         private set
 
     var ready by mutableStateOf(false)
@@ -153,12 +158,90 @@ class LibraryViewModel(
         if (!pushInboxEnabled) return
         val inbox = pushInbox ?: return
         val cursorStore = syncCursorStore ?: return
-        val repo = deviceRepositoryProvider() ?: return
+        val at = System.currentTimeMillis()
+        val repo = deviceRepositoryProvider() ?: run {
+            // Not paired: still make it visible rather than silently doing nothing.
+            inboxStatus = inboxStatus.copy(
+                lastPollAt = at,
+                lastPollError = "not paired: cannot poll inbox",
+                lastPollErrorAt = at,
+            )
+            return
+        }
         try {
             val materialised = inbox.poll(repo, cursorStore)
+            inboxStatus = inboxStatus.copy(
+                lastPollAt = at,
+                lastMaterialised = materialised,
+                lastPollError = null,
+                lastPollErrorAt = null,
+                skipped = inbox.skippedJobs(),
+            )
             if (materialised > 0) refresh()
-        } catch (_: Exception) {
-            // Offline / unpaired / HTTP error: keep the cached state; the next poll retries.
+        } catch (e: Exception) {
+            // Stage 29: NEVER swallow. Log the job id (when known) + the exception class and
+            // message, and RECORD it so Settings shows it. Still non-fatal (no crash, cached
+            // state kept, next poll retries).
+            val jobId = (e as? InboxMaterialiseException)?.jobId
+            android.util.Log.w(
+                "PushInbox",
+                "inbox poll failed" + (jobId?.let { " for job $it" } ?: "") +
+                    ": ${e.javaClass.simpleName}: ${e.message}",
+                e,
+            )
+            inboxStatus = inboxStatus.copy(
+                lastPollAt = at,
+                lastPollError = "${e.javaClass.simpleName}: ${e.message}",
+                lastPollErrorAt = at,
+                skipped = inbox.skippedJobs(),
+            )
+        }
+    }
+
+    /**
+     * Stage 29 "Resync inbox" (Settings): forget the cursor + the skipped/poison set, re-run
+     * the backfill, and surface the result via [inboxStatus]. Non-fatal like the poll.
+     */
+    fun resyncInbox() {
+        if (!pushInboxEnabled) return
+        val inbox = pushInbox ?: return
+        val cursorStore = syncCursorStore ?: return
+        viewModelScope.launch {
+            val at = System.currentTimeMillis()
+            val repo = deviceRepositoryProvider() ?: run {
+                inboxStatus = inboxStatus.copy(
+                    lastPollAt = at,
+                    lastPollError = "not paired: cannot resync inbox",
+                    lastPollErrorAt = at,
+                )
+                return@launch
+            }
+            try {
+                val materialised = inbox.resync(repo, cursorStore)
+                inboxStatus = inboxStatus.copy(
+                    lastPollAt = at,
+                    lastMaterialised = materialised,
+                    lastPollError = null,
+                    lastPollErrorAt = null,
+                    skipped = inbox.skippedJobs(),
+                )
+                refresh()
+                loadBadges()
+            } catch (e: Exception) {
+                val jobId = (e as? InboxMaterialiseException)?.jobId
+                android.util.Log.w(
+                    "PushInbox",
+                    "inbox resync failed" + (jobId?.let { " for job $it" } ?: "") +
+                        ": ${e.javaClass.simpleName}: ${e.message}",
+                    e,
+                )
+                inboxStatus = inboxStatus.copy(
+                    lastPollAt = at,
+                    lastPollError = "${e.javaClass.simpleName}: ${e.message}",
+                    lastPollErrorAt = at,
+                    skipped = inbox.skippedJobs(),
+                )
+            }
         }
     }
 

@@ -163,6 +163,8 @@ class MainActivity : ComponentActivity() {
                     repoProvider = { LoopServices.repositoryFrom(tokenStore) },
                     cacheDir = applicationContext.cacheDir,
                 ),
+                // Stage 29: persist per-job failure counts + the skipped set across restarts.
+                failures = com.inkwell.net.PrefsInboxFailureStore(applicationContext),
             )
         } else {
             null
@@ -212,7 +214,14 @@ class MainActivity : ComponentActivity() {
                                 canReturnToCanvas = BuildConfig.INK_ENABLED,
                                 onBack = { showSettings = false },
                             ) {
-                                PairingScreen(viewModel = pairingViewModel)
+                                // Stage 29: surface the push-inbox status + Resync in Settings
+                                // (only when the inbox is wired: PUSH_INBOX + Library flow).
+                                val showInbox = BuildConfig.PUSH_INBOX && BuildConfig.LIBRARY
+                                PairingScreen(
+                                    viewModel = pairingViewModel,
+                                    inboxStatus = if (showInbox) libraryViewModel.inboxStatus else null,
+                                    onResyncInbox = if (showInbox) libraryViewModel::resyncInbox else null,
+                                )
                             }
                         }
                         BuildConfig.LIBRARY -> {

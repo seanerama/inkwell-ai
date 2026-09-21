@@ -1,13 +1,21 @@
 package com.inkwell.net
 
 import kotlinx.coroutines.delay
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import retrofit2.HttpException
 
 /**
  * Thin repository over [DeviceApi]: maps HTTP failures to [ApiException] via the
  * error envelope, and drives the `system.ping` round-trip by polling `/sync`.
+ *
+ * [baseUrl] is the paired server base (null in tests with a fake [DeviceApi]); it is used
+ * only to turn a RELATIVE signed blob link into an absolute one before the `@Url` call
+ * (Stage 29 — see [downloadBlob]).
  */
-class DeviceRepository(private val api: DeviceApi) {
+class DeviceRepository(
+    private val api: DeviceApi,
+    private val baseUrl: String? = null,
+) {
 
     /** Default foreground poll cadence while a job is outstanding (contract device-api §Sync). */
     val pollIntervalMs: Long = 5_000
@@ -61,7 +69,20 @@ class DeviceRepository(private val api: DeviceApi) {
      * fresh `url` from [getCanvas].
      */
     suspend fun downloadBlob(url: String): ByteArray =
-        apiCall { api.downloadBlob(url).use { it.bytes() } }
+        apiCall { api.downloadBlob(absoluteBlobUrl(url)).use { it.bytes() } }
+
+    /**
+     * Stage 29: the server (stage 21 `signed_url`) returns a RELATIVE signed link
+     * (`/v1/blobs/{key}?sig=&exp=`, no scheme/host). [DeviceApi.downloadBlob] documents an
+     * absolute `@Url`, so resolve the link against the paired [baseUrl] here — an already
+     * absolute link resolves to itself, so this is a no-op for those. When [baseUrl] is null
+     * (fake-API tests) or unparseable, the link is passed through unchanged (Retrofit then
+     * resolves a relative `@Url` against its own base as before).
+     */
+    private fun absoluteBlobUrl(url: String): String {
+        val base = baseUrl?.toHttpUrlOrNull() ?: return url
+        return base.resolve(url)?.toString() ?: url
+    }
 
     /** Stage 10: set a card's state (open|done|dismissed); returns the updated card. */
     suspend fun patchCard(cardId: String, state: String): CardResponse =

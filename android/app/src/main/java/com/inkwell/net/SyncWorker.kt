@@ -66,7 +66,8 @@ class SyncWorker(
             rasterDao = db.rasterDao(),
         )
         val downloader = CachingBlobDownloader({ repo }, applicationContext.cacheDir)
-        val inbox = PushInbox(store, downloader)
+        // Stage 29: share the persisted poison-page guard with the foreground poll.
+        val inbox = PushInbox(store, downloader, failures = PrefsInboxFailureStore(applicationContext))
         val cursorStore = PrefsSyncCursorStore(applicationContext)
         inbox.poll(repo, cursorStore)
     }

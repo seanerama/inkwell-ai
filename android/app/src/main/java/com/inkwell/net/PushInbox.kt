@@ -22,7 +22,28 @@ class PushInbox(
     private val downloader: BlobDownloader,
     private val clock: () -> Long = { System.currentTimeMillis() },
     private val json: Json = defaultJson,
+    /**
+     * Stage 29 poison-page guard: per-job consecutive-failure counts + the skipped set.
+     * Defaults to in-memory so existing `PushInbox(store, downloader)` call sites and JVM
+     * fakes keep working; the app injects [PrefsInboxFailureStore] so skips survive restarts.
+     */
+    private val failures: InboxFailureStore = InMemoryInboxFailureStore(),
 ) {
+
+    /** Jobs skipped by the poison-page guard, as `jobId -> reason` (for `InboxStatus`). */
+    fun skippedJobs(): Map<String, String> = failures.skipped()
+
+    /**
+     * Stage 29 "Resync inbox": forget the cursor, the skipped set and the failure counts,
+     * then run one [poll] — which now backfills from `sync(null)` (dedupe protects against
+     * duplicates) and retries every previously-skipped job. Returns the number materialised.
+     */
+    suspend fun resync(repo: DeviceRepository, cursorStore: SyncCursorStore): Int {
+        failures.clearSkipped()
+        failures.clearAllFailures()
+        cursorStore.clear()
+        return poll(repo, cursorStore)
+    }
 
     /**
      * One discovery pass. Page from the persisted cursor, which is null on first run (fresh
@@ -42,7 +63,15 @@ class PushInbox(
      * Returns the number of jobs materialised this pass.
      */
     suspend fun poll(repo: DeviceRepository, cursorStore: SyncCursorStore): Int {
-        var cursor: String? = cursorStore.get() // null on first run → backfill from the start
+        val storedVersion = cursorStore.getSchemaVersion()
+        // Stage 29: an already-installed device has a persisted cursor and so never runs the
+        // first-run backfill. When its stored schema version is older than the current one
+        // (e.g. an upgrade from v0.0.17, which never wrote the key → reads 0), backfill ONCE
+        // from sync(null); dedupe protects against duplicates. A fresh install (null cursor)
+        // already backfills from null, so it is not treated as an upgrade here.
+        val upgradeBackfill = cursorStore.get() != null && storedVersion < INBOX_SCHEMA_VERSION
+
+        var cursor: String? = if (upgradeBackfill) null else cursorStore.get()
         var reseeded = false
         var materialised = 0
         while (true) {
@@ -59,15 +88,34 @@ class PushInbox(
                 throw e
             }
             for (job in resp.jobs) {
-                if (job.direction == "to_user" && job.status == "done") {
+                if (job.direction != "to_user" || job.status != "done") continue
+                // Poison-page guard: a job that already failed MAX_MATERIALISE_FAILURES times
+                // is skipped so it cannot wedge the cursor; a Resync clears the skip to retry.
+                if (failures.isSkipped(job.id)) continue
+                try {
                     if (materialise(job)) materialised++
+                    failures.clearFailure(job.id) // a clean pass resets the consecutive count
+                } catch (e: Exception) {
+                    val count = failures.recordFailure(job.id)
+                    if (count >= MAX_MATERIALISE_FAILURES) {
+                        // Third consecutive failure: skip this job and let the cursor advance
+                        // PAST it so later pushes are not blocked (recorded for Inbox status).
+                        failures.markSkipped(job.id, "${e.javaClass.simpleName}: ${e.message}")
+                    } else {
+                        // Earlier failures: keep the cursor put so the page is retried next
+                        // poll (dedupe skips what already landed). Surface the job id + cause.
+                        throw InboxMaterialiseException(job.id, e)
+                    }
                 }
             }
-            // Advance ONLY after the whole page materialised without throwing.
+            // Advance ONLY after the whole page materialised (or its poison job was skipped).
             cursor = resp.cursor
             cursorStore.set(resp.cursor)
             if (resp.jobs.size < PAGE_SIZE) break
         }
+        // Record that this device is now current, so the one-time upgrade backfill above
+        // runs exactly once (persisted only after a successful pass).
+        if (storedVersion < INBOX_SCHEMA_VERSION) cursorStore.setSchemaVersion(INBOX_SCHEMA_VERSION)
         return materialised
     }
 
@@ -174,6 +222,13 @@ class PushInbox(
         const val PAGE_SIZE = 100
 
         /**
+         * Stage 29 poison-page guard: after this many CONSECUTIVE failed materialise attempts
+         * the offending job is skipped and the cursor advances past it, so one bad push cannot
+         * block every later one. A manual Resync clears the count and retries.
+         */
+        const val MAX_MATERIALISE_FAILURES = 3
+
+        /**
          * HTTP status the server returns for an unknown/invalid `/sync` cursor (contract
          * device-api: `422` validation). Treated as "re-seed and backfill" in [poll].
          */
@@ -193,3 +248,16 @@ class PushInbox(
             PAGE_SUFFIX.replace(pageTitle, "").trim().ifEmpty { pageTitle.trim() }
     }
 }
+
+/**
+ * Stage 29: raised by [PushInbox.poll] when materialising a specific job fails (before the
+ * poison-page threshold), so the caller can log the job id + the underlying cause instead of
+ * swallowing a bare exception. Android-free — the caller does the actual `Log.w`.
+ */
+class InboxMaterialiseException(
+    val jobId: String,
+    cause: Throwable,
+) : Exception(
+    "materialise failed for job $jobId: ${cause.javaClass.simpleName}: ${cause.message}",
+    cause,
+)

@@ -57,7 +57,9 @@ interface DeviceApi {
      * Stage 22: download a blob by its full signed URL (`GET /blobs/{key}?sig=&exp=`). The
      * URL already carries the signature; the bearer header is added by [AuthInterceptor].
      * `@Streaming` avoids buffering the whole (up to 20 MB) blob in memory before we copy it
-     * to the cache file. `@Url` takes the absolute link verbatim from the raster `url`.
+     * to the cache file. `@Url` takes an ABSOLUTE link; the server ships a relative signed
+     * link (`/v1/blobs/{key}?sig=&exp=`), so [DeviceRepository.downloadBlob] resolves it
+     * against the paired base URL before calling here (Stage 29).
      */
     @Streaming
     @GET
