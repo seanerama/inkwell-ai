@@ -14,13 +14,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
@@ -573,89 +577,109 @@ private fun Toolbar(
     onOpenSettings: () -> Unit,
     debugEnabled: Boolean,
 ) {
+    // Stage 28: the actions live in a horizontally-scrollable strip so a long toolbar
+    // never clips them off-screen, while the overflow (⋮) — which holds Undo and the
+    // always-reachable Settings — stays pinned to the trailing edge at any width.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ToolButton("Pen", selected = viewModel.tool == "pen", tag = CanvasTags.PEN) {
-            viewModel.selectTool("pen")
-        }
-        ToolButton("Marker", selected = viewModel.tool == "marker", tag = CanvasTags.MARKER) {
-            viewModel.selectTool("marker")
-        }
-        ToolButton("Eraser", selected = viewModel.tool == "eraser", tag = CanvasTags.ERASER) {
-            viewModel.selectTool("eraser")
-        }
-
-        Spacer(Modifier.size(8.dp))
-
-        CanvasViewModel.PALETTE.forEachIndexed { index, hex ->
-            ColorSwatch(
-                hex = hex,
-                selected = viewModel.colorHex == hex && viewModel.tool != "eraser",
-                tag = CanvasTags.color(index),
-            ) { viewModel.selectColor(hex) }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        // Debug-only tools (BuildConfig.DEBUG); absent from release builds.
-        if (debugEnabled) {
-            OutlinedButton(
-                onClick = viewModel::exportPreview,
-                modifier = Modifier.testTag(CanvasTags.EXPORT_PREVIEW),
-            ) { Text("Export preview") }
-            OutlinedButton(
-                onClick = viewModel::toggleFixture,
-                modifier = Modifier.testTag(CanvasTags.RENDER_FIXTURE),
-            ) { Text(if (viewModel.fixtureVisible) "Hide fixture" else "Render fixture") }
-        }
-
-        // Send — present only when the kill-switch is ON; disabled when offline. Stage 7:
-        // one tap posts canvas.ask; the optional note lives behind "Add a note…".
-        if (viewModel.sendEnabled) {
-            OutlinedButton(
-                onClick = viewModel::toggleLayerTray,
-                modifier = Modifier.testTag(CanvasTags.LAYERS),
-            ) { Text("Layers") }
-            // The note sheet is reachable whenever one-tap ask OR the Stage-10 picker is on
-            // (the picker lives inside the sheet).
-            if (viewModel.oneTapAsk || viewModel.cardActionsEnabled) {
-                // Stage 11: a visible "Note" label sits beside the pencil — the owner
-                // could not find the bare icon (2026-09-16). The whole affordance opens
-                // the note sheet.
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .clickable(enabled = viewModel.online, onClick = viewModel::openInstruction)
-                        .testTag(CanvasTags.ADD_NOTE),
-                ) {
-                    IconButton(
-                        onClick = viewModel::openInstruction,
-                        enabled = viewModel.online,
-                    ) { Icon(Icons.Filled.Edit, contentDescription = "Add a note…") }
-                    Text("Note", modifier = Modifier.testTag(CanvasTags.NOTE_LABEL))
-                }
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ToolButton("Pen", selected = viewModel.tool == "pen", tag = CanvasTags.PEN) {
+                viewModel.selectTool("pen")
             }
-            Button(
-                onClick = viewModel::onSendTapped,
-                enabled = viewModel.online,
-                modifier = Modifier.testTag(CanvasTags.SEND),
-            ) { Text(viewModel.sendLabel) }
+            ToolButton("Marker", selected = viewModel.tool == "marker", tag = CanvasTags.MARKER) {
+                viewModel.selectTool("marker")
+            }
+            ToolButton("Eraser", selected = viewModel.tool == "eraser", tag = CanvasTags.ERASER) {
+                viewModel.selectTool("eraser")
+            }
+
+            Spacer(Modifier.size(8.dp))
+
+            CanvasViewModel.PALETTE.forEachIndexed { index, hex ->
+                ColorSwatch(
+                    hex = hex,
+                    selected = viewModel.colorHex == hex && viewModel.tool != "eraser",
+                    tag = CanvasTags.color(index),
+                ) { viewModel.selectColor(hex) }
+            }
+
+            // Debug-only tools (BuildConfig.DEBUG); absent from release builds.
+            if (debugEnabled) {
+                OutlinedButton(
+                    onClick = viewModel::exportPreview,
+                    modifier = Modifier.testTag(CanvasTags.EXPORT_PREVIEW),
+                ) { Text("Export preview") }
+                OutlinedButton(
+                    onClick = viewModel::toggleFixture,
+                    modifier = Modifier.testTag(CanvasTags.RENDER_FIXTURE),
+                ) { Text(if (viewModel.fixtureVisible) "Hide fixture" else "Render fixture") }
+            }
+
+            // Send — present only when the kill-switch is ON; disabled when offline. Stage 7:
+            // one tap posts canvas.ask; the optional note lives behind "Add a note…".
+            if (viewModel.sendEnabled) {
+                OutlinedButton(
+                    onClick = viewModel::toggleLayerTray,
+                    modifier = Modifier.testTag(CanvasTags.LAYERS),
+                ) { Text("Layers") }
+                // The note sheet is reachable whenever one-tap ask OR the Stage-10 picker is on
+                // (the picker lives inside the sheet).
+                if (viewModel.oneTapAsk || viewModel.cardActionsEnabled) {
+                    // Stage 11: a visible "Note" label sits beside the pencil — the owner
+                    // could not find the bare icon (2026-09-16). The whole affordance opens
+                    // the note sheet.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clickable(enabled = viewModel.online, onClick = viewModel::openInstruction)
+                            .testTag(CanvasTags.ADD_NOTE),
+                    ) {
+                        IconButton(
+                            onClick = viewModel::openInstruction,
+                            enabled = viewModel.online,
+                        ) { Icon(Icons.Filled.Edit, contentDescription = "Add a note…") }
+                        Text("Note", modifier = Modifier.testTag(CanvasTags.NOTE_LABEL))
+                    }
+                }
+                Button(
+                    onClick = viewModel::onSendTapped,
+                    enabled = viewModel.online,
+                    modifier = Modifier.testTag(CanvasTags.SEND),
+                ) { Text(viewModel.sendLabel) }
+            }
         }
 
-        OutlinedButton(
-            onClick = viewModel::undoLast,
-            modifier = Modifier.testTag(CanvasTags.UNDO),
-        ) { Text("Undo") }
-
-        TextButton(
-            onClick = onOpenSettings,
-            modifier = Modifier.testTag(CanvasTags.SETTINGS),
-        ) { Text("Settings") }
+        // Trailing overflow: pinned (never scrolls, never clips). Holds Undo + Settings so
+        // Settings is always one tap away regardless of the toolbar's width.
+        var overflow by remember { mutableStateOf(false) }
+        Box {
+            IconButton(
+                onClick = { overflow = true },
+                modifier = Modifier.testTag(CanvasTags.OVERFLOW),
+            ) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
+            DropdownMenu(expanded = overflow, onDismissRequest = { overflow = false }) {
+                DropdownMenuItem(
+                    text = { Text("Undo") },
+                    onClick = { overflow = false; viewModel.undoLast() },
+                    modifier = Modifier.testTag(CanvasTags.UNDO),
+                )
+                DropdownMenuItem(
+                    text = { Text("Settings") },
+                    onClick = { overflow = false; onOpenSettings() },
+                    modifier = Modifier.testTag(CanvasTags.SETTINGS),
+                )
+            }
+        }
     }
 }
 
@@ -691,6 +715,9 @@ object CanvasTags {
     const val ERASER = "canvas_eraser"
     const val UNDO = "canvas_undo"
     const val SETTINGS = "canvas_settings"
+
+    // Stage 28: the trailing overflow (⋮) that holds Undo + Settings so Settings never clips.
+    const val OVERFLOW = "canvas_overflow"
     const val EXPORT_PREVIEW = "canvas_export_preview"
     const val RENDER_FIXTURE = "canvas_render_fixture"
     const val EXPORT_PREVIEW_INFO = "canvas_export_preview_info"

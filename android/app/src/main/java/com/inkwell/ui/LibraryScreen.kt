@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -70,6 +71,12 @@ fun LibraryScreen(
     viewModel: LibraryViewModel,
     onOpenCanvas: (String) -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * Stage 28: opens the settings/pairing screen (server URL + token). Plumbed from
+     * MainActivity.LibraryRoute so the gear in the breadcrumb bar is one tap from the
+     * Library. Defaults to a no-op so existing call sites/tests that omit it still compile.
+     */
+    onOpenSettings: () -> Unit = {},
     loadThumbnail: (CanvasEntity) -> ImageBitmap? = { null },
     /**
      * Stage 15: hosts the space-settings sheet + "new space" dialog. Null (default) keeps the
@@ -106,7 +113,7 @@ fun LibraryScreen(
                     unseenBySpace = viewModel.unseenBySpace,
                 )
             }
-            BreadcrumbBar(viewModel = viewModel)
+            BreadcrumbBar(viewModel = viewModel, onOpenSettings = onOpenSettings)
 
             if (viewModel.showTrash) {
                 TrashList(viewModel = viewModel)
@@ -238,7 +245,7 @@ fun LibraryScreen(
 }
 
 @Composable
-private fun BreadcrumbBar(viewModel: LibraryViewModel) {
+private fun BreadcrumbBar(viewModel: LibraryViewModel, onOpenSettings: () -> Unit) {
     Surface(tonalElevation = 2.dp) {
         Row(
             modifier = Modifier
@@ -254,6 +261,11 @@ private fun BreadcrumbBar(viewModel: LibraryViewModel) {
                     TextButton(onClick = { viewModel.navigateTo(index) }) { Text(folder.name) }
                 }
             }
+            // Stage 28: Settings is one tap from the Library — a gear beside the Trash entry.
+            IconButton(
+                onClick = onOpenSettings,
+                modifier = Modifier.testTag(LibraryTags.SETTINGS),
+            ) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
             if (viewModel.showTrash) {
                 TextButton(
                     onClick = { viewModel.closeTrash() },
@@ -565,6 +577,7 @@ private fun relativeDate(thenMs: Long): String {
 object LibraryTags {
     const val SCREEN = "library_screen"
     const val BREADCRUMB = "library_breadcrumb"
+    const val SETTINGS = "library_settings"
     const val FAB = "library_fab"
     const val NEW_CANVAS = "library_new_canvas"
     const val NEW_FOLDER = "library_new_folder"

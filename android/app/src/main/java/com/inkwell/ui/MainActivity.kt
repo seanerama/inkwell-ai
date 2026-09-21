@@ -247,6 +247,7 @@ class MainActivity : ComponentActivity() {
             LibraryScreen(
                 viewModel = libraryViewModel,
                 onOpenCanvas = { selectedCanvasId = it },
+                onOpenSettings = onOpenSettings,
                 settingsViewModel = spaceSettingsViewModel,
                 loadThumbnail = { canvas ->
                     val f = thumbnailRenderer.file(canvas.id)

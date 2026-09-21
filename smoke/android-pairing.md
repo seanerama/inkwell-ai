@@ -51,6 +51,8 @@ ships a new APK.
 - [ ] Ping reaches `done` with `{"pong":true}` (screenshot D).
 - [ ] The token was entered once and persists across an app restart (it is stored in
       `EncryptedSharedPreferences`; reopening the app keeps the URL and token).
+- [ ] Settings is reachable from the Library gear (tap the gear in the Library's
+      breadcrumb bar → the pairing screen with the Server URL + token fields opens).
 
 ## Kill-switch note
 
