@@ -58,3 +58,28 @@ def test_backfill_fills_empty_and_preserves_user_edit(db):
     db.refresh(home)
     assert work.system_prompt == "MY OWN CUSTOM WORK PROMPT", "a user edit is never overwritten"
     assert home.system_prompt == _default_prompt("home"), "an empty prompt is backfilled"
+
+
+def test_seed_gives_defaults_brain_search_tool(db):
+    # Fresh insert: every default space allows brain_search (Stage 26).
+    db.execute(text("DELETE FROM spaces"))
+    db.commit()
+    seed_default_spaces(db)
+    rows = db.execute(select(Space)).scalars().all()
+    assert all(r.tools == ["brain_search"] for r in rows)
+
+
+def test_tools_backfill_fills_empty_and_preserves_edit(db):
+    work = db.execute(select(Space).where(Space.slug == "work")).scalar_one()
+    home = db.execute(select(Space).where(Space.slug == "home")).scalar_one()
+
+    # work: a user-edited tool list must be preserved. home: emptied -> backfilled.
+    work.tools = ["custom_tool"]
+    home.tools = []
+    db.commit()
+
+    assert seed_default_spaces(db) == 0  # backfill is never a create
+    db.refresh(work)
+    db.refresh(home)
+    assert work.tools == ["custom_tool"], "an edited tools list is never overwritten"
+    assert home.tools == ["brain_search"], "an empty tools list is backfilled"

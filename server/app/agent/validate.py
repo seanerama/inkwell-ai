@@ -16,7 +16,9 @@ Flow for a single agent run:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -39,6 +41,8 @@ class AgentRun:
     input_tokens: int
     output_tokens: int
     coordinate_clamps: int
+    # Stage 26: {"query", "count"} per brain_search across all attempts (traceability).
+    brain_lookups: list[dict] = field(default_factory=list)
 
 
 class AgentValidationError(Exception):
@@ -76,8 +80,14 @@ def run_agent(
     instruction: str | None,
     job_type: str,
     job_id: str,
+    tools: list[dict] | None = None,
+    tool_executor: Callable[[str, dict], Any] | None = None,
 ) -> AgentRun:
-    """Run the agent for one job, with two-tier validation and one retry."""
+    """Run the agent for one job, with two-tier validation and one retry.
+
+    ``tools``/``tool_executor`` (Stage 26) are threaded to ``create_message``; when tools
+    are empty or ``AGENT_TOOLS_ENABLED`` is off the call stays byte-identical to today's.
+    """
     # The frozen contract is the schema of record; the API gets its supported projection
     # (unsupported constraints are re-checked by Pydantic after the call).
     schema = for_structured_output(frozen_schema())
@@ -94,6 +104,7 @@ def run_agent(
 
     total_in = 0
     total_out = 0
+    brain_lookups: list[dict] = []
     last_error: Exception | None = None
 
     for attempt in range(MAX_ATTEMPTS):
@@ -103,9 +114,12 @@ def run_agent(
             messages=messages,
             schema=schema,
             job_type=job_type,
+            tools=tools,
+            tool_executor=tool_executor,
         )
         total_in += call.input_tokens
         total_out += call.output_tokens
+        brain_lookups.extend(call.brain_lookups)
 
         try:
             data = extract_json(call.raw_text)
@@ -144,6 +158,7 @@ def run_agent(
             input_tokens=total_in,
             output_tokens=total_out,
             coordinate_clamps=clamps,
+            brain_lookups=brain_lookups,
         )
 
     raise AgentValidationError(

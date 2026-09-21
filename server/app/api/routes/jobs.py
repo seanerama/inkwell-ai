@@ -27,12 +27,11 @@ router = APIRouter()
 MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB decoded (contract coordinate-mapping / device-api)
 
 # SPEC §7 job types implemented as of this stage.
-IMPLEMENTED_JOB_TYPES = {"canvas.annotate", "canvas.ask", "canvas.formalize"}
+IMPLEMENTED_JOB_TYPES = {"canvas.annotate", "canvas.ask", "canvas.formalize", "canvas.extract"}
 # Implemented types that need an exported canvas image (contract device-api).
-IMAGE_JOB_TYPES = {"canvas.annotate", "canvas.ask", "canvas.formalize"}
+IMAGE_JOB_TYPES = {"canvas.annotate", "canvas.ask", "canvas.formalize", "canvas.extract"}
 # SPEC §7 job types that will land in later stages (still 422 not_implemented).
 SPEC_JOB_TYPES = {
-    "canvas.extract",
     "canvas.action",
     "agent.push_canvas",
     "agent.push_document",

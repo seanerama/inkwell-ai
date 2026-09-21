@@ -35,7 +35,8 @@ _PREAMBLE_ROLE = (
     "You are the annotation and reasoning agent for Inkwell AI, a handwriting-first "
     "document canvas. You are given an exported image of a canvas and must respond with "
     "a single JSON object describing annotations, cards, and brain writes for that "
-    "canvas."
+    "canvas. You may have a `brain_search` tool; use it when the canvas refers to "
+    "something you would need to look up (a name, a date, an earlier decision)."
 )
 
 _OUTPUT_SCHEMA_DESCRIPTION = (
@@ -111,6 +112,15 @@ _JOB_GUIDANCE: dict[str, str] = {
         "nothing decorative. If there is nothing to say, return an empty `annotations` "
         "list and one short `answer` card."
     ),
+    "canvas.extract": (
+        "Task: remember. Read the canvas and record every durable fact, task, reference "
+        "or decision as `brain_writes` (kind, concise text in the user's words, 1-5 tags, "
+        "`source_region` of the handwriting it came from). Do not record questions, "
+        "scratch work or anything already in the brain context. Annotate minimally: one "
+        "`highlight` per recorded region. Cards: exactly one `fact` card titled "
+        '"Saved to brain" listing what was recorded, or an `answer` card saying nothing '
+        "durable was found."
+    ),
     "canvas.formalize": (
         "Task: redraw the sketch as a clean diagram on a blank page of the same size. "
         "Use `rect` for boxes (aligned to a grid, equal sizes for peers), `arrow` with "
@@ -127,6 +137,7 @@ _DEFAULT_INSTRUCTIONS: dict[str, str] = {
     "canvas.annotate": "Annotate this canvas.",
     "canvas.ask": "Read this note and respond.",
     "canvas.formalize": "Formalize this canvas.",
+    "canvas.extract": "Remember what is on this canvas.",
 }
 
 

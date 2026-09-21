@@ -30,6 +30,14 @@ class _Block:
         self.text = text
 
 
+class _ToolUseBlock:
+    def __init__(self, block_id: str, name: str, tool_input: dict) -> None:
+        self.type = "tool_use"
+        self.id = block_id
+        self.name = name
+        self.input = tool_input
+
+
 class _Usage:
     def __init__(self, input_tokens: int, output_tokens: int) -> None:
         self.input_tokens = input_tokens
@@ -39,6 +47,7 @@ class _Usage:
 class _Response:
     def __init__(self, text: str, input_tokens: int, output_tokens: int) -> None:
         self.content = [_Block(text)]
+        self.stop_reason = "end_turn"
         self.usage = _Usage(input_tokens, output_tokens)
 
 
@@ -65,6 +74,51 @@ class FakeAnthropic:
         if isinstance(payloads, str):
             payloads = [payloads]
         self.messages = _Messages(payloads, tokens)
+
+
+# --- Scripted tool-use fake (Stage 26) -------------------------------------------------
+
+
+class _ScriptResponse:
+    def __init__(self, content: list, stop_reason: str, tokens: tuple[int, int]) -> None:
+        self.content = content
+        self.stop_reason = stop_reason
+        self.usage = _Usage(*tokens)
+
+
+def text_turn(text: str) -> dict:
+    """A scripted turn that ends with a final text answer."""
+    return {"blocks": [_Block(text)], "stop_reason": "end_turn"}
+
+
+def tool_turn(*calls: tuple[str, str, dict]) -> dict:
+    """A scripted turn that emits one or more ``tool_use`` blocks (id, name, input)."""
+    blocks = [_ToolUseBlock(cid, name, tool_input) for cid, name, tool_input in calls]
+    return {"blocks": blocks, "stop_reason": "tool_use"}
+
+
+class _ScriptMessages:
+    def __init__(self, turns: list[dict], tokens: tuple[int, int]) -> None:
+        self._turns = turns
+        self._tokens = tokens
+        self.calls: list[dict[str, Any]] = []
+
+    def create(self, **kwargs: Any) -> _ScriptResponse:
+        self.calls.append(kwargs)
+        idx = min(len(self.calls) - 1, len(self._turns) - 1)
+        turn = self._turns[idx]
+        return _ScriptResponse(turn["blocks"], turn["stop_reason"], self._tokens)
+
+
+class FakeToolAnthropic:
+    """A scripted fake for the tool loop: each turn is ``text_turn``/``tool_turn``.
+
+    Turns are returned in order (the last repeats). Captures ``messages.create`` kwargs
+    in ``self.messages.calls`` so tests can assert the request shape per round.
+    """
+
+    def __init__(self, turns: list[dict], tokens: tuple[int, int] = (11, 7)) -> None:
+        self.messages = _ScriptMessages(turns, tokens)
 
 
 def json_payload(data: dict) -> str:

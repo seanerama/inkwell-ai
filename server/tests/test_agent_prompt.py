@@ -74,5 +74,5 @@ def test_annotate_guidance_has_diagram_vocabulary():
 def test_effort_per_job_type():
     assert client.effort_for("canvas.annotate") == "medium"
     assert client.effort_for("canvas.ask") == "low"
-    assert client.effort_for("canvas.extract") == "low"
+    assert client.effort_for("canvas.extract") == "medium"  # Stage 26 (SPEC §7)
     assert client.effort_for("canvas.formalize") == "high"

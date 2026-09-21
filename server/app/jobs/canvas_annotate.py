@@ -36,11 +36,13 @@ _FAILURE_TITLES = {
     "canvas.annotate": "Could not annotate",
     "canvas.ask": "Could not respond",
     "canvas.formalize": "Could not formalize",
+    "canvas.extract": "Could not remember",
 }
 _FAILURE_BODIES = {
     "canvas.annotate": "The agent could not produce a valid annotation for this canvas.",
     "canvas.ask": "The agent could not produce a valid response to this note.",
     "canvas.formalize": "The agent could not produce a clean diagram for this canvas.",
+    "canvas.extract": "The agent could not record what is on this canvas.",
 }
 
 # Default canvas dimensions (SPEC §4.2) when the source canvas is not server-known.
@@ -166,15 +168,34 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
     model = space.model if space and space.model else ""
     space_prompt = space.system_prompt if space else ""
 
+    # Stage 26: fill <brain_context> from the store (gated by BRAIN_ENABLED; off → empty
+    # block, today's behaviour) and resolve the space's tool allow-list. The tool loop
+    # itself is separately gated by AGENT_TOOLS_ENABLED inside create_message: an empty
+    # tools list (or the switch off) sends NO tools param — byte-identical to before.
+    brain_context = ""
+    tools: list[dict] = []
+    tool_executor = None
+    if settings.brain_enabled and space is not None:
+        from app.agent.tools import make_executor, resolve_tools
+        from app.brain.retrieve import retrieve_brain
+
+        brain_context = retrieve_brain(
+            ctx.session, space.slug, job.canvas_id, ctx.request.get("instruction")
+        )
+        tools = resolve_tools(space.tools)
+        tool_executor = make_executor(ctx.session, space.slug)
+
     try:
         run = run_agent(
             model=model,
             system_prompt=space_prompt,
-            brain_context="",  # empty this stage (SPEC §10.3)
+            brain_context=brain_context,
             image_b64=image_b64,
             instruction=ctx.request.get("instruction"),
             job_type=job.type,
             job_id=str(job.id),
+            tools=tools,
+            tool_executor=tool_executor,
         )
     except AgentValidationError as exc:
         # The agent WAS called; record the tokens it spent before failing the job.
@@ -195,6 +216,11 @@ def handle_canvas_annotate(ctx: JobContext) -> dict:
 
     result = run.output.model_dump(by_alias=True)
     result["contract_version"] = CONTRACT_VERSION
+
+    # Stage 26: record each brain_search the model ran as a server-added sibling (not a
+    # contract field; precedent: contract_version). Omitted when no lookup happened.
+    if run.brain_lookups:
+        result["brain_lookups"] = run.brain_lookups
 
     # Stage 25 (ADR-0013 §2): persist the model's brain_writes into brain_entries with
     # provenance, inside this same done transaction, and record the created ids as a
@@ -234,3 +260,7 @@ register_job_handler("canvas.ask", handle_canvas_annotate)
 # Stage 12: canvas.formalize reuses the same handler; it additionally creates an
 # agent-origin canvas row and adds the canvas/source_canvas_id sibling keys to result.
 register_job_handler("canvas.formalize", handle_canvas_annotate)
+# Stage 26: canvas.extract ("Remember") reuses the same pipeline — an agent job whose
+# agent-output brain_writes stage 25 persists; its guidance/effort differ (prompt.py,
+# client.py), the output shape does not.
+register_job_handler("canvas.extract", handle_canvas_annotate)
