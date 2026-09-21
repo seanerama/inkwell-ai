@@ -14,6 +14,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import retrofit2.HttpException
 import retrofit2.Response
@@ -35,12 +36,15 @@ class PushInboxTest {
         val rasters = mutableListOf<RasterEntity>()
         val folders = mutableListOf<Pair<String, String>>() // (spaceId, name)
         private var folderSeq = 0
+        /** Stage 29: when true, insertCanvas throws BEFORE persisting (a persistent poison). */
+        var insertFails = false
         override suspend fun canvasExists(canvasId: String) = canvases.any { it.id == canvasId }
         override suspend fun createFolder(spaceId: String, name: String): String {
             folders += spaceId to name
             return "folder-${folderSeq++}"
         }
         override suspend fun insertCanvas(canvas: CanvasEntity) {
+            if (insertFails) throw IllegalStateException("insert boom for ${canvas.id}")
             canvases.removeAll { it.id == canvas.id }
             canvases += canvas
         }
@@ -48,7 +52,7 @@ class PushInboxTest {
         override suspend fun insertRaster(raster: RasterEntity) { rasters += raster }
     }
 
-    private class FakeDownloader(val fail: Boolean = false) : BlobDownloader {
+    private class FakeDownloader(var fail: Boolean = false) : BlobDownloader {
         val calls = mutableListOf<String>()
         override suspend fun download(url: String, canvasId: String, rasterId: String, page: Int?, mime: String): String {
             calls += url
@@ -57,10 +61,22 @@ class PushInboxTest {
         }
     }
 
-    private class FakeCursorStore(var value: String? = null) : SyncCursorStore {
+    private class FakeCursorStore(var value: String? = null, var schema: Int = INBOX_SCHEMA_VERSION) : SyncCursorStore {
         val sets = mutableListOf<String>()
         override fun get(): String? = value
         override fun set(cursor: String) { value = cursor; sets += cursor }
+        override fun clear() { value = null }
+        override fun getSchemaVersion(): Int = schema
+        override fun setSchemaVersion(version: Int) { schema = version }
+    }
+
+    /** A [DeviceApi] that returns the same `/sync` page for every cursor (poison/resync tests). */
+    private class RepeatingApi(private val page: SyncResponse) : UnusedApi() {
+        val cursorsSent = mutableListOf<String?>()
+        override suspend fun sync(cursor: String?): SyncResponse {
+            cursorsSent += cursor
+            return page
+        }
     }
 
     /** A [DeviceApi] returning scripted `/sync` pages; every other route is unused. */
@@ -347,6 +363,113 @@ class PushInboxTest {
         assertTrue("a materialise failure propagates", threw)
         assertEquals("cursor stays put so the page is retried", "c0", cursor.value)
         assertTrue("cursor was never advanced", cursor.sets.isEmpty())
+    }
+
+    // --- Stage 29 -----------------------------------------------------------------------
+
+    @Test
+    fun upgrade_with_old_schema_backfills_once_then_pages_normally() = runTest {
+        // Finding (1): an already-installed device has a persisted cursor and so never runs the
+        // first-run backfill; a build that never wrote a schema version reads 0, so the first
+        // poll after upgrade backfills once from sync(null) and stores the current version.
+        val store = FakeStore()
+        val cursor = FakeCursorStore(value = "c-old", schema = 0) // upgraded from v0.0.17
+        val api = FakeApi(
+            ArrayDeque(
+                listOf(
+                    SyncResponse(jobs = listOf(pushJob("j1", singlePageResult("c1"))), cursor = "c-new"),
+                    SyncResponse(jobs = emptyList(), cursor = "c-new2"),
+                ),
+            ),
+        )
+        val repo = DeviceRepository(api)
+        val inbox = PushInbox(store, FakeDownloader())
+
+        val first = inbox.poll(repo, cursor)
+        assertEquals("the upgrade backfills the pre-upgrade push", 1, first)
+        assertEquals("upgrade pages from sync(null), not the stored cursor", null, api.cursorsSent.first())
+        assertEquals("current schema version stored after the backfill", INBOX_SCHEMA_VERSION, cursor.schema)
+        assertEquals("c-new", cursor.value)
+
+        val second = inbox.poll(repo, cursor)
+        assertEquals("a second poll does not backfill again", 0, second)
+        assertEquals("second poll pages from the persisted cursor", "c-new", api.cursorsSent[1])
+    }
+
+    @Test
+    fun throwing_materialise_records_the_error_and_keeps_the_cursor() = runTest {
+        // Finding (2): a materialise failure must NOT be swallowed — the cursor stays put and
+        // the thrown InboxMaterialiseException names the offending job so the caller can log it.
+        val store = FakeStore().apply { insertFails = true } // throws before persisting
+        val failures = InMemoryInboxFailureStore()
+        val cursor = FakeCursorStore(value = "c0")
+        val api = FakeApi(ArrayDeque(listOf(SyncResponse(jobs = listOf(pushJob("j1", singlePageResult("c1"))), cursor = "c1"))))
+        val inbox = PushInbox(store, FakeDownloader(), failures = failures)
+
+        var caught: InboxMaterialiseException? = null
+        try {
+            inbox.poll(DeviceRepository(api), cursor)
+        } catch (e: InboxMaterialiseException) {
+            caught = e
+        }
+
+        assertEquals("the failure surfaces the offending job id", "j1", caught?.jobId)
+        assertEquals("cursor stays put so the page is retried", "c0", cursor.value)
+        assertTrue("cursor never advanced", cursor.sets.isEmpty())
+        assertFalse("one failure does not skip the job yet", failures.isSkipped("j1"))
+    }
+
+    @Test
+    fun third_consecutive_failure_skips_job_and_advances_cursor() = runTest {
+        // Poison-page guard: the same job failing on 3 consecutive polls is skipped and the
+        // cursor advances past it so later pushes are not blocked forever.
+        val store = FakeStore().apply { insertFails = true } // persistent poison
+        val failures = InMemoryInboxFailureStore()
+        val cursor = FakeCursorStore(value = "c0")
+        val page = SyncResponse(jobs = listOf(pushJob("poison", singlePageResult("c1"))), cursor = "c1")
+        val repo = DeviceRepository(RepeatingApi(page))
+        val inbox = PushInbox(store, FakeDownloader(), failures = failures)
+
+        repeat(2) {
+            try {
+                inbox.poll(repo, cursor)
+                fail("expected a materialise failure on poll ${it + 1}")
+            } catch (_: InboxMaterialiseException) {
+            }
+        }
+        assertEquals("cursor unchanged after two failures", "c0", cursor.value)
+        assertFalse(failures.isSkipped("poison"))
+
+        val n = inbox.poll(repo, cursor)
+        assertEquals("nothing materialised on the skip pass", 0, n)
+        assertTrue("the job is skipped after 3 consecutive failures", failures.isSkipped("poison"))
+        assertEquals("cursor advances past the poison page", "c1", cursor.value)
+    }
+
+    @Test
+    fun resync_retries_a_previously_skipped_job() = runTest {
+        val store = FakeStore().apply { insertFails = true }
+        val failures = InMemoryInboxFailureStore()
+        val cursor = FakeCursorStore(value = "c0")
+        val page = SyncResponse(jobs = listOf(pushJob("poison", singlePageResult("c1"))), cursor = "c1")
+        val api = RepeatingApi(page)
+        val repo = DeviceRepository(api)
+        val inbox = PushInbox(store, FakeDownloader(), failures = failures)
+
+        // Drive the job to the skip (two throws, then the skip pass).
+        repeat(2) { try { inbox.poll(repo, cursor) } catch (_: InboxMaterialiseException) {} }
+        inbox.poll(repo, cursor)
+        assertTrue(failures.isSkipped("poison"))
+        assertTrue("nothing landed while poisoned", store.canvases.isEmpty())
+
+        // The transient clears; Resync forgets the skip + cursor and retries from null.
+        store.insertFails = false
+        val n = inbox.resync(repo, cursor)
+
+        assertEquals("resync materialises the retried job", 1, n)
+        assertFalse("the job is no longer skipped after a clean resync", failures.isSkipped("poison"))
+        assertEquals(1, store.canvases.size)
+        assertEquals("resync backfilled from null", null, api.cursorsSent.last())
     }
 
     @Test

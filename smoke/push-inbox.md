@@ -144,7 +144,11 @@ That is the bug this scenario proves is fixed.
 | 3-page push → **folder** "Report" with three **"Report — pN"** pages | pass (v0.0.17, 2026-09-21: folder "Three pages" with p1–p3 appeared after an app restart; pages blank because the fixture PDF has no content) |
 | Page 2 renders the **second** PDF page | inconclusive — fixture pages are empty; retest with a real multi-page PDF (stage 29) |
 | Restart: canvases persist; re-refresh makes **no duplicates** | not reported |
-| **Stage 24 backfill:** the five pushes from 2026-09-18 (predating the tablet's first sync) all appear after upgrading to the fixed APK, with expired links re-fetched and no duplicates | pending — verify on the fixed build (worked example: owner's five 2026-09-18 pushes) |
+| **Stage 24 backfill:** the five pushes from 2026-09-18 (predating the tablet's first sync) all appear after upgrading to the fixed APK, with expired links re-fetched and no duplicates | pending — verify on the stage-29 build (worked example: owner's five 2026-09-18 pushes) |
+| **Stage 29 upgrade backfill:** upgrading from v0.0.17 (cursor already persisted) backfills the five 2026-09-18 pushes on the first poll without a reinstall, exactly once (no duplicates on the next poll) | pending — verify on the stage-29 APK: install over v0.0.17, open Library, wait one poll → the five appear; pull-to-refresh again → still five |
+| **Stage 29 re-pushes:** the two 2026-09-21 13:01 re-pushes (a 1-page and a 3-page, relative signed `url`) appear and their blobs download (regression for the silent failure) | pending — verify on the stage-29 APK: both land, pages render, folder for the 3-page |
+| **Stage 29 visible errors:** Settings ("Inbox: last poll HH:MM, N new, error: …") shows the poll result; a paused/unpaired or failing poll shows an error instead of nothing | pending — Settings from the Library gear shows the Inbox line |
+| **Stage 29 Resync:** "Resync inbox" in Settings clears the cursor + skipped set and re-runs the backfill; a poisoned job (skipped after 3 failures) is retried | pending — tap Resync after a backfill; skipped count drops |
 | Screenshots A–F attached | none |
 
 ## Notes
@@ -156,3 +160,11 @@ That is the bug this scenario proves is fixed.
 - Poll cadence (SPEC §8): 60 s foreground, 5 s while a send is outstanding, 5 min
   backgrounded (the durable `SyncWorker`). Pull-to-refresh forces a poll.
 - Pushed canvases are ordinary canvases: rename, move, trash, and Formalize all work.
+- **Stage 29:** the inbox poll no longer swallows errors — the last poll (time, count, error,
+  skipped count) is shown in Settings, reached via the Library gear (stage 28). An upgrade
+  (cursor already stored) now runs the `sync(null)` backfill once, keyed on a persisted
+  `inbox_schema_version`. A job that fails to materialise on 3 consecutive polls is skipped so
+  it cannot wedge the cursor; **Resync inbox** clears the cursor + skips and re-backfills. The
+  server ships a RELATIVE signed raster `url` (`/v1/blobs/…`); the device resolves it against
+  the paired base URL before the download (this was the reproduction target — the URL was NOT
+  the root cause; the swallow was).

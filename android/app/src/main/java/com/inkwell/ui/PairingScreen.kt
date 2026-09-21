@@ -34,6 +34,10 @@ fun PairingScreen(
     viewModel: PairingViewModel,
     modifier: Modifier = Modifier,
     pingEnabled: Boolean = BuildConfig.PING_ENABLED,
+    // Stage 29: the push-inbox status + Resync control. Null when the push inbox is not wired
+    // (flag OFF / pairing-only build), in which case the Inbox section is not shown.
+    inboxStatus: InboxStatus? = null,
+    onResyncInbox: (() -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -94,7 +98,36 @@ fun PairingScreen(
 
         Spacer(Modifier.height(8.dp))
         Text(text = viewModel.status, modifier = Modifier.testTag(PairingTags.STATUS))
+
+        // Stage 29: push-inbox status + Resync so a swallowed poll failure is visible and the
+        // owner can force a backfill (upgrade / missed / poisoned pushes).
+        if (inboxStatus != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = inboxStatusLine(inboxStatus),
+                modifier = Modifier.fillMaxWidth().testTag(PairingTags.INBOX_STATUS),
+            )
+            OutlinedButton(
+                onClick = { onResyncInbox?.invoke() },
+                enabled = onResyncInbox != null,
+                modifier = Modifier.testTag(PairingTags.INBOX_RESYNC),
+            ) {
+                Text("Resync inbox")
+            }
+        }
     }
+}
+
+/** Human line for the Inbox status, e.g. "Inbox: last poll 13:04, 0 new, error: …". */
+private fun inboxStatusLine(status: InboxStatus): String {
+    val time = status.lastPollAt?.let {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(it))
+    } ?: "never"
+    val base = "Inbox: last poll $time, ${status.lastMaterialised} new"
+    val err = status.lastPollError?.let { ", error: $it" } ?: ""
+    val skipped = if (status.skipped.isEmpty()) "" else ", skipped ${status.skipped.size} (Resync to retry)"
+    return base + err + skipped
 }
 
 /** Stable tags for the instrumented/Compose tests. */
@@ -105,4 +138,6 @@ object PairingTags {
     const val CHECK = "pairing_check"
     const val PING = "pairing_ping"
     const val STATUS = "pairing_status"
+    const val INBOX_STATUS = "pairing_inbox_status"
+    const val INBOX_RESYNC = "pairing_inbox_resync"
 }

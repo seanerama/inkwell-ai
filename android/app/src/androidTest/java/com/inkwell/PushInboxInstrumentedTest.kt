@@ -87,6 +87,22 @@ class PushInboxInstrumentedTest {
         return """{"id":"$jId","space_id":"$spaceId","canvas_id":"$cvId","direction":"to_user","type":"agent.push_document","status":"done","request":{},"result":$result,"created_at":"2026-09-18T00:00:00Z","updated_at":"2026-09-18T00:00:01Z"}"""
     }
 
+    /**
+     * Stage 29: the `to_user` result exactly as the server ships it — the raster `url` is a
+     * RELATIVE signed link (`/v1/blobs/...`, no scheme/host), which is the 2026-09-21 payload
+     * shape. Used to prove the download path resolves it and fetches the blob end to end.
+     */
+    private fun syncPageRelBody(): String {
+        val result = """
+            {"canvas":{"id":"srv-pushed-rel","space_id":"$spaceId","title":"Brief","width_cu":2480,"height_cu":3508,"origin":"agent"},
+             "canvases":[{"id":"srv-pushed-rel","space_id":"$spaceId","title":"Brief","width_cu":2480,"height_cu":3508,"origin":"agent"}],
+             "layers":[{"id":"layer-rel","canvas_id":"srv-pushed-rel","z":-1,"owner":"agent","type":"raster","job_id":"job-push-rel"}],
+             "rasters":[{"id":"raster-rel","layer_id":"layer-rel","url":"/v1/blobs/push/rel.pdf?sig=deadbeef&exp=1790000000","mime":"application/pdf","page":0,"x_cu":0,"y_cu":0,"w_cu":2480,"h_cu":3508}],
+             "cards":[]}
+        """.trimIndent().replace("\n", "")
+        return """{"jobs":[{"id":"job-push-rel","space_id":"$spaceId","canvas_id":"srv-pushed-rel","direction":"to_user","type":"agent.push_document","status":"done","request":{},"result":$result,"created_at":"2026-09-21T13:01:00Z","updated_at":"2026-09-21T13:01:01Z"}],"cursor":"crel1"}"""
+    }
+
     /** Fresh-install backfill: `sync` WITHOUT a cursor returns two pre-existing pushed jobs. */
     private fun backfillPageBody(base: String): String {
         val j1 = pushedJob(jobId, canvasId, "raster-1", "layer-r1", base + "v1/blobs/push/abc.pdf")
@@ -107,6 +123,9 @@ class PushInboxInstrumentedTest {
                     // cursor manually, so the first real poll asks with cursor=c0 → the page.
                     path.startsWith("/v1/sync") && path.contains("cursor=c0") ->
                         MockResponse().setResponseCode(200).setBody(syncPageBody(base() + "v1/blobs/push/abc.pdf"))
+                    // Stage 29: a page whose raster carries the server's RELATIVE signed link.
+                    path.startsWith("/v1/sync") && path.contains("cursor=crel") ->
+                        MockResponse().setResponseCode(200).setBody(syncPageRelBody())
                     // Fresh install: the first poll has no persisted cursor, so `sync` is called
                     // WITHOUT a cursor query → backfill the two pre-existing pushes (Stage 24).
                     path.startsWith("/v1/sync") && !path.contains("cursor=") ->
@@ -214,5 +233,36 @@ class PushInboxInstrumentedTest {
 
         // Badge: two unread pushed canvases in the space.
         assertEquals(2, library.unseenPushedCount(spaceId))
+    }
+
+    @Test
+    fun relative_signed_url_downloads_blob_end_to_end() = runBlocking {
+        // Stage 29 regression for the 2026-09-21 silent failure: the server ships a RELATIVE
+        // raster `url` (`/v1/blobs/...`). With the paired base URL threaded through, the whole
+        // Library wiring (PushInbox -> CachingBlobDownloader -> DeviceRepository -> Retrofit)
+        // resolves it and fetches the blob — no canvas ever opened (also covers the
+        // "null-provider" lead the spec ruled out).
+        val store = RoomPushedCanvasStore(db.canvasDao(), db.layerDao(), db.folderDao(), db.rasterDao())
+        val url = server.url("/").toString()
+        // The repository carries the base so the relative signed link resolves to absolute.
+        val repo = DeviceRepository(ApiClient.create(url, InMemoryTokenStore(url)), url)
+        val downloader = CachingBlobDownloader({ repo }, cacheDir)
+        val inbox = PushInbox(store, downloader)
+
+        val cursor = object : com.inkwell.net.SyncCursorStore {
+            var v: String? = "crel"
+            override fun get() = v
+            override fun set(cursor: String) { v = cursor }
+        }
+
+        val materialised = inbox.poll(repo, cursor)
+        assertEquals("the relative-url push materialised", 1, materialised)
+
+        val canvas = db.canvasDao().byId("srv-pushed-rel")
+        assertNotNull(canvas)
+        val rasterLayer = db.layerDao().forCanvas("srv-pushed-rel").single { it.type == "raster" }
+        val raster = db.rasterDao().forLayer(rasterLayer.id).single()
+        val cached = File(raster.blobUri)
+        assertTrue("the blob GET happened and was cached", cached.exists() && cached.length() > 0)
     }
 }

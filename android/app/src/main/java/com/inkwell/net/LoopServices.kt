@@ -22,6 +22,7 @@ object LoopServices {
      */
     fun repositoryFrom(tokenStore: TokenStore): DeviceRepository? {
         val base = tokenStore.getBaseUrl() ?: return null
-        return DeviceRepository(ApiClient.create(base, tokenStore))
+        // Pass the base so relative signed blob links resolve to absolute before @Url (Stage 29).
+        return DeviceRepository(ApiClient.create(base, tokenStore), baseUrl = base)
     }
 }
