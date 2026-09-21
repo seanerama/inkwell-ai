@@ -100,3 +100,9 @@ curl -sS -H "Authorization: Bearer $TOKEN" "$HOST/v1/brain/work?q=budget"
 
 Delete any smoke entries you created (Step 5). Turn `BRAIN_ENABLED` back to its intended
 value and `dc up -d api worker` if you flipped it only for this smoke.
+
+## Results log
+
+| Date (UTC) | Release | Operator | POST + search | Idempotent POST | Auth (none/agent) | DELETE | Notes |
+|---|---|---|---|---|---|---|---|
+| 2026-09-21 19:40 | v0.0.18 | Release Operator (curl on host) | pass (q=budget → 1 hit) | pass (200, same id) | pass (401 / 403) | pass (204, gone) | **Listing 500s whenever an agent-written entry is in the result** (array `source_region` vs `Rect` object) → stage 30 (#65). `save_to_brain` not exercised. |

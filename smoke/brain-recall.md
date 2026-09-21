@@ -99,3 +99,9 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X DELETE \
 
 Return `AGENT_TOOLS_ENABLED` / `BRAIN_ENABLED` / `AGENT_ENABLED` to their intended values
 and `dc up -d api worker` if you flipped any only for this smoke.
+
+## Results log
+
+| Date (UTC) | Release | Operator | Extract (Remember) | Recall (Ask, other canvas) | brain_search tool | Notes |
+|---|---|---|---|---|---|---|
+| 2026-09-21 19:40 | v0.0.18 | Release Operator (curl on host, synthetic canvas PNGs) | pass — done, 1 "Saved to brain" card, 2 writes, `brain_entry_ids`=2 | **pass** — answer: "Austin, 14 Oct (Q3 offsite)… flights by 30 Sep" | called with "Q3 offsite date location", **count 0** (AND-matching) → stage 30 | Recall rode on `<brain_context>` injection; `GET /brain/work?q=offsite` returned 500 (stage 30). Tools backfilled to `['brain_search']` on the four seeded spaces. |
