@@ -103,16 +103,16 @@ SSH (`ssh mini-hp01`).
 
 | Check | Result |
 | --- | --- |
-| Kill-switch: which build (debug/release), `PUSH_INBOX` ON | |
-| 1-page push → **Learning** tab shows a badge within 60 s (or on pull-to-refresh) | |
-| Tile shows a **New** dot; opening renders the **PDF page** legibly beneath ink | |
-| Opening clears the **New** dot and the **tab badge** | |
-| Layer tray shows a **Document** layer whose toggle hides/shows the page | |
-| Writing lands **on top** of the document; **Ask** answer references the document | |
-| 3-page push → **folder** "Report" with three **"Report — pN"** pages | |
-| Page 2 renders the **second** PDF page | |
-| Restart: canvases persist; re-refresh makes **no duplicates** | |
-| Screenshots A–F attached | |
+| Kill-switch: which build (debug/release), `PUSH_INBOX` ON | release v0.0.16, ON (2026-09-21) |
+| 1-page push → **Learning** tab shows a badge within 60 s (or on pull-to-refresh) | pass — tablet synced and fetched the blob 10 s after the CLI push (server log) |
+| Tile shows a **New** dot; opening renders the **PDF page** legibly beneath ink | pass (owner: page legible) |
+| Opening clears the **New** dot and the **tab badge** | pass (owner) |
+| Layer tray shows a **Document** layer whose toggle hides/shows the page | not reported (owner did not exercise) |
+| Writing lands **on top** of the document; **Ask** answer references the document | pass — owner annotated the plan and the Ask answer referenced its content (Phase 4 acceptance met) |
+| 3-page push → **folder** "Report" with three **"Report — pN"** pages | pending — the 2026-09-18 three-page push predates the tablet's first sync (stage 24 backfill) |
+| Page 2 renders the **second** PDF page | pending (see above) |
+| Restart: canvases persist; re-refresh makes **no duplicates** | not reported |
+| Screenshots A–F attached | none |
 
 ## Notes
 
