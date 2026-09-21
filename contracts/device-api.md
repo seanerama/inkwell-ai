@@ -319,3 +319,42 @@ Each is rate-limited to **10 requests per minute per agent token**; the 11th in 
 Writes a blank `origin=agent` canvas (A4 portrait, or the same-area landscape swap when
 `landscape` is true) and a done `to_user` `agent.push_canvas` job. `space` and `title` are
 required.
+
+## Stage 25 additions (2026-09-21)
+
+Additive only (ADR-0013 Stage 25). The three `/brain/{space_slug}` routes in the route
+table above become live; the route table and the `BrainEntry` entity shape are unchanged.
+All three are **device-token only** (an agent-kind token gets `403 forbidden`, as for
+every device route) and are gated by the **`BRAIN_ENABLED`** kill-switch (default OFF):
+when it is off, all three return `403 { error.code: "disabled" }`, and the
+`save_to_brain` card action below keeps returning `422 not_implemented`.
+
+- **`BrainEntry.job_id`** — a new **optional** field on the `BrainEntry` shape: the
+  `to_agent` job whose `brain_writes` produced the row, or `null` for an entry created by
+  the device (`POST /brain/{space_slug}`) or the `save_to_brain` card action. The full
+  returned shape is `{ id, space_slug, kind, text, tags, source_canvas_id, source_region,
+  job_id, created_at }`. Consumers that do not know `job_id` ignore it.
+
+- **`GET /brain/{space_slug}?q=&limit=`** → `BrainEntry[]`. Unknown slug → `404
+  not_found`. `limit` defaults to 50 and is capped at 200 (a larger value is clamped, not
+  rejected). Soft-deleted rows are never returned. With `q`, results are the entries
+  matching `websearch_to_tsquery('english', q)` over a `tsvector` of the entry text
+  (weight A) and tags (weight B), ranked by `ts_rank_cd` then `created_at desc`; a `q`
+  with no match returns `[]`. Without `q`, the newest entries first.
+
+- **`POST /brain/{space_slug}`** body `{ kind, text (1–2000), tags?, source_canvas_id? }`
+  → `201 BrainEntry`. **Idempotent:** when a live entry with the same normalised text
+  already exists in the space, the route returns `200` with that existing entry rather
+  than creating a duplicate. Unknown slug → `404`.
+
+- **`DELETE /brain/{space_slug}/{id}`** → `204`. Soft delete (the row is retained with a
+  `deleted_at` stamp and never returned again). `404 not_found` for an unknown id or an
+  id that belongs to a different space.
+
+- **`save_to_brain` card action** (`POST /cards/{id}/actions/{action_id}`) — with
+  `BRAIN_ENABLED` on, creating an entry from the card (`kind` = the action payload's
+  `kind` when one of the four brain kinds, else `fact`; `text` = the card title and body;
+  `tags` from the payload; `source_canvas_id` from the parent job), marking the card
+  `done` and bumping the parent job. The response is the card as before **plus a
+  `brain_entry_id` sibling** (the created or existing entry's id). With the switch off it
+  is unchanged: `422 not_implemented`.

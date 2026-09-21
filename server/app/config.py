@@ -81,6 +81,16 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("PUSH_ENABLED", "INKWELL_PUSH_ENABLED"),
     )
 
+    # Stage 25 kill-switch (default OFF, ADR-0013). When false, brain_writes are NOT
+    # persisted (and no brain_entry_ids sibling is added to the job result), the three
+    # /brain/{space_slug} routes return 403 with error.code="disabled", and the
+    # save_to_brain card action keeps returning 422 not_implemented. Accepts a bare
+    # ``BRAIN_ENABLED`` in addition to the ``INKWELL_``-prefixed form.
+    brain_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("BRAIN_ENABLED", "INKWELL_BRAIN_ENABLED"),
+    )
+
     env: str = "dev"
 
     # NOTE: ANTHROPIC_API_KEY is intentionally NOT a field here. The anthropic SDK

@@ -45,7 +45,7 @@ def _clean():
     with sm() as session:
         session.execute(
             text(
-                "TRUNCATE cards, jobs, canvases, device_tokens, app_meta "
+                "TRUNCATE cards, jobs, canvases, device_tokens, app_meta, brain_entries "
                 "RESTART IDENTITY CASCADE"
             )
         )
