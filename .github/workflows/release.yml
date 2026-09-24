@@ -13,6 +13,9 @@ permissions:
   packages: write   # push to ghcr.io
 jobs:
   server-image:
+    # Nothing is pushed to GHCR or attached to the Release unless the emulator lane is
+    # green (feature-assessments/ci-gates-binding-assessment.md, Change B).
+    needs: android-instrumented
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +80,9 @@ jobs:
   # the ANDROID_KEYSTORE_BASE64 secret at build time and never committed; when the
   # secret is absent (e.g. a fork) app/build.gradle.kts leaves the build unsigned.
   android-apk:
+    # Nothing is pushed to GHCR or attached to the Release unless the emulator lane is
+    # green (feature-assessments/ci-gates-binding-assessment.md, Change B).
+    needs: android-instrumented
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
