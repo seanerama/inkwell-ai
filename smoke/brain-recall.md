@@ -80,12 +80,37 @@ curl -sS -H "Authorization: Bearer $TOKEN" "$HOST/v1/jobs/<job-id>" | \
 ```
 
 - *Expected (PASS):* the answer still names Austin / 14 October, **and**
-  `result.brain_lookups` is a non-empty list like `[{"query": "offsite", "count": 1}]` —
+  `result.brain_lookups` is a non-empty list like
+  `[{"query": "offsite", "count": 1, "mode": "and"}]` —
   the model chose to call `brain_search` and received the entry as data.
 - *FAIL signals:* `brain_lookups` is absent with the switch on **and** an offsite-related
   ask (the tool was never offered — check the Work space still lists `brain_search` in its
   `tools`, and that `AGENT_TOOLS_ENABLED=true` reached the containers). With the switch
   **off** its absence is the expected default — recall then rides on Step 3 alone.
+
+## Step 5 — agent-written rows list, and a multi-word lookup falls back to OR (Stage 30)
+
+v0.0.18 found two bugs here: the Work listing `500`'d once Step 2 had written an entry
+(its `source_region` is the `Rect` array `[x, y, w, h]`), and the model's four-word
+`brain_search` query matched nothing because every term was ANDed. Check both:
+
+```sh
+# the listing (no q) includes Step 2's agent-written row -> 200, source_region an array
+curl -sS -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer $TOKEN" "$HOST/v1/brain/work"
+curl -sS -H "Authorization: Bearer $TOKEN" "$HOST/v1/brain/work" | \
+  python3 -c 'import sys,json; print([r["source_region"] for r in json.load(sys.stdin)])'
+# the four-word query the model used on v0.0.18: AND finds nothing, OR finds the fact
+curl -sS -G -H "Authorization: Bearer $TOKEN" "$HOST/v1/brain/work" \
+  --data-urlencode "q=Q3 offsite date location"
+```
+
+With `AGENT_TOOLS_ENABLED=true`, repeat Step 4 and read `result.brain_lookups` again.
+
+| Check | Expected (PASS) | FAIL signals |
+|---|---|---|
+| `GET /v1/brain/work` (no `q`) after Step 2 | `200`; each `source_region` is `null` or a 4-number array like `[0.1, 0.2, 0.3, 0.4]` | `500` (the v0.0.18 bug); a `{x,y,w,h}` object |
+| `GET /v1/brain/work?q=Q3 offsite date location` | `200`, a non-empty list containing the Step 2 fact | `[]` (no OR fallback) |
+| `result.brain_lookups` on the four-word query (tools on) | every entry has a `mode`; a four-word lookup such as `"Q3 offsite date location"` has `count ≥ 1` and `"mode": "or"` | a four-word lookup with `count 0`; `mode` absent |
 
 ## Cleanup
 

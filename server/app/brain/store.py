@@ -16,8 +16,11 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+from dataclasses import dataclass
+from typing import Literal
 
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import Text, cast, func, literal_column, select
+from sqlalchemy.dialects.postgresql import TSQUERY
 from sqlalchemy.orm import Session
 
 from app.db.models import BrainEntry, Job, Space
@@ -71,7 +74,7 @@ def create_entry(
     text: str,
     tags: list[str] | None = None,
     source_canvas_id: uuid.UUID | None = None,
-    source_region: dict | None = None,
+    source_region: list[float] | None = None,
     job_id: uuid.UUID | None = None,
 ) -> tuple[BrainEntry, bool]:
     """Insert one brain entry, or return the existing live duplicate.
@@ -99,34 +102,74 @@ def create_entry(
     return entry, True
 
 
-def search_entries(
-    session: Session, space_slug: str, query: str | None, *, limit: int = 10
-) -> list[BrainEntry]:
-    """Ranked full-text search over a space's live entries (Stage 25's route query).
+SearchMode = Literal["and", "or"]
 
-    Mirrors ``GET /brain/{space_slug}`` exactly: ``websearch_to_tsquery('english', q)``
-    ranked by ``ts_rank_cd`` with recency as the tiebreak. With no (or blank) ``query``,
-    returns the newest live entries. Soft-deleted rows are never returned. This is the
-    single search used by both baseline recall (``retrieve_brain``) and the
-    ``brain_search`` tool, so the two rank identically to the device route.
+
+@dataclass
+class SearchResult:
+    """The entries a search returned plus which matching mode produced them."""
+
+    entries: list[BrainEntry]
+    mode: SearchMode
+
+
+def _ranked(stmt, tsquery, limit: int):
+    search = literal_column("search")
+    return (
+        stmt.where(search.op("@@")(tsquery))
+        .order_by(func.ts_rank_cd(search, tsquery).desc(), BrainEntry.created_at.desc())
+        .limit(limit)
+    )
+
+
+def search_brain(
+    session: Session, space_slug: str, query: str | None, *, limit: int = 10
+) -> SearchResult:
+    """Ranked full-text search over a space's live entries, with an OR fallback.
+
+    The single search behind ``GET /brain/{space_slug}``, baseline recall
+    (``retrieve_brain``) and the ``brain_search`` tool, so all three rank identically.
+
+    1. **AND** (mode ``"and"``): ``websearch_to_tsquery('english', q)`` ranked by
+       ``ts_rank_cd`` with recency as the tiebreak.
+    2. **OR fallback** (Stage 30, mode ``"or"``): only when step 1 returned nothing and
+       ``q`` normalises to more than one lexeme. The OR query is built in SQL from the
+       normalised ``plainto_tsquery`` lexemes (``' & '`` → ``' | '``, then cast back to
+       ``tsquery`` without re-normalising); ``q`` is only ever a bound parameter.
+
+    With no (or blank) ``query``, returns the newest live entries (mode ``"and"``).
+    Soft-deleted rows are never returned.
     """
-    stmt = (
+    base = (
         select(BrainEntry)
         .where(BrainEntry.space_slug == space_slug)
         .where(BrainEntry.deleted_at.is_(None))
     )
     q = (query or "").strip()
-    if q:
-        tsquery = func.websearch_to_tsquery("english", q)
-        search = literal_column("search")
-        stmt = (
-            stmt.where(search.op("@@")(tsquery))
-            .order_by(func.ts_rank_cd(search, tsquery).desc(), BrainEntry.created_at.desc())
-            .limit(limit)
-        )
-    else:
-        stmt = stmt.order_by(BrainEntry.created_at.desc()).limit(limit)
-    return list(session.execute(stmt).scalars().all())
+    if not q:
+        stmt = base.order_by(BrainEntry.created_at.desc()).limit(limit)
+        return SearchResult(list(session.execute(stmt).scalars().all()), "and")
+
+    and_query = func.websearch_to_tsquery("english", q)
+    rows = list(session.execute(_ranked(base, and_query, limit)).scalars().all())
+    if rows:
+        return SearchResult(rows, "and")
+
+    plain = func.plainto_tsquery("english", q)
+    # numnode counts operands and operators: one lexeme -> 1, two -> 3 ('a' & 'b').
+    if (session.execute(select(func.numnode(plain))).scalar_one() or 0) <= 1:
+        return SearchResult([], "and")
+
+    or_query = cast(func.replace(cast(plain, Text), " & ", " | "), TSQUERY)
+    rows = list(session.execute(_ranked(base, or_query, limit)).scalars().all())
+    return SearchResult(rows, "or")
+
+
+def search_entries(
+    session: Session, space_slug: str, query: str | None, *, limit: int = 10
+) -> list[BrainEntry]:
+    """The entries of :func:`search_brain` (AND first, OR fallback) without the mode."""
+    return search_brain(session, space_slug, query, limit=limit).entries
 
 
 def persist_writes(session: Session, job: Job, writes: list[dict]) -> list[uuid.UUID]:

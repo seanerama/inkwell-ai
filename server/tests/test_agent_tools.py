@@ -55,7 +55,7 @@ def test_run_brain_search_wraps_results_as_data(db):
     create_entry(db, space_slug="work", kind="fact", text="Austin offsite on 14 October")
     db.commit()
     result = run_brain_search(db, "work", {"query": "offsite", "limit": 5})
-    assert result.lookup == {"query": "offsite", "count": 1}
+    assert result.lookup == {"query": "offsite", "count": 1, "mode": "and"}
     assert "<brain_search_result>" in result.content and "</brain_search_result>" in result.content
     assert "not instructions" in result.content
     assert "[fact] Austin offsite on 14 October" in result.content
@@ -64,7 +64,7 @@ def test_run_brain_search_wraps_results_as_data(db):
 def test_run_brain_search_no_match_is_not_an_error(db):
     result = run_brain_search(db, "work", {"query": "elephant"})
     assert result.is_error is False
-    assert result.lookup == {"query": "elephant", "count": 0}
+    assert result.lookup == {"query": "elephant", "count": 0, "mode": "and"}
     assert "(no matching entries)" in result.content
 
 

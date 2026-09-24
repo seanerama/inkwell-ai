@@ -121,7 +121,7 @@ def test_ask_with_tools_calls_brain_search_and_records_lookup(
     got = client.get(f"/v1/jobs/{job_id}", headers=auth).json()
     assert got["status"] == "done"
     # The search reached the model as data and is recorded for traceability.
-    assert got["result"]["brain_lookups"] == [{"query": "offsite", "count": 1}]
+    assert got["result"]["brain_lookups"] == [{"query": "offsite", "count": 1, "mode": "and"}]
     tool_result = ask.messages.calls[1]["messages"][-1]["content"][0]
     assert _FACT in tool_result["content"]
     # The first round sent the space's resolved tools.

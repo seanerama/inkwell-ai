@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.brain.retrieve import format_entry
-from app.brain.store import search_entries
+from app.brain.store import search_brain
 from app.logging import get_logger
 
 log = get_logger("agent")
@@ -70,7 +70,9 @@ class ToolResult:
 
     content: str
     is_error: bool = False
-    lookup: dict | None = None  # {"query", "count"} for result.brain_lookups traceability
+    # {"query", "count", "mode"} for result.brain_lookups traceability; ``mode`` is
+    # "and" | "or" (Stage 30: which matching produced the entries).
+    lookup: dict | None = None
 
 
 def resolve_tools(space_tools: list[str] | None) -> list[dict[str, Any]]:
@@ -102,10 +104,13 @@ def run_brain_search(session: Session, space_slug: str, tool_input: dict | None)
     data = tool_input or {}
     query = str(data.get("query", "")).strip()
     limit = _clamp_limit(data.get("limit", _DEFAULT_LIMIT))
-    entries = search_entries(session, space_slug, query, limit=limit)
+    found = search_brain(session, space_slug, query, limit=limit)
+    entries = found.entries
     body = "\n".join(format_entry(e) for e in entries) if entries else "(no matching entries)"
     content = f"<brain_search_result>\n{_DATA_NOTICE}\n\n{body}\n</brain_search_result>"
-    return ToolResult(content=content, lookup={"query": query, "count": len(entries)})
+    return ToolResult(
+        content=content, lookup={"query": query, "count": len(entries), "mode": found.mode}
+    )
 
 
 def make_executor(session: Session, space_slug: str):

@@ -5,8 +5,9 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 SLUG_PATTERN = r"^[a-z0-9-]{1,64}$"
 COLOR_PATTERN = r"^#[0-9a-fA-F]{6}$"
@@ -165,6 +166,10 @@ class BrainEntryOut(BaseModel):
     ``job_id`` is the Stage 25 additive field (ADR-0013), documented in the dated
     device-api section: the to_agent job whose ``brain_writes`` produced the row, or
     ``null`` for a device/card-created entry.
+
+    ``source_region`` is the agent-output ``Rect`` — ``[x, y, w, h]`` normalised 0–1 — or
+    ``null`` (Stage 30: it was mistyped as an object, so any agent-written row 500'd the
+    listing). A legacy ``{x, y, w, h}`` object is accepted on read and emitted as the array.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -175,9 +180,22 @@ class BrainEntryOut(BaseModel):
     text: str
     tags: list[str]
     source_canvas_id: uuid.UUID | None
-    source_region: dict | None
+    source_region: (
+        Annotated[list[Annotated[float, Field(ge=0.0, le=1.0)]], Field(min_length=4, max_length=4)]
+        | None
+    )
     job_id: uuid.UUID | None
     created_at: datetime
+
+    @field_validator("source_region", mode="before")
+    @classmethod
+    def _legacy_region_object(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            try:
+                return [value["x"], value["y"], value["w"], value["h"]]
+            except KeyError as exc:
+                raise ValueError("source_region object must have x, y, w and h") from exc
+        return value
 
 
 class JobOut(BaseModel):

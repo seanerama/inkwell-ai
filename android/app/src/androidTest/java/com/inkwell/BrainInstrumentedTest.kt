@@ -33,6 +33,10 @@ import java.util.Collections
  * (ADR-0013 §6). Verifies the list renders, search issues `GET …?q=…`, long-press → Delete
  * calls `DELETE` and removes the row, and "+" → add POSTs and inserts.
  *
+ * Stage 30: the fact row `b2` is agent-written — it carries a `job_id` and the contract
+ * `Rect` array `source_region` `[x, y, w, h]` (the v0.0.18 listing 500'd on exactly such a
+ * row), so every test here parses the array form through the real `BrainEntry` model.
+ *
  * Compose is pinned to 1.6.8 (stage 16/22/28 lesson): no `waitUntil(conditionDescription,
  * timeoutMillis)` overload — use `waitUntil(timeoutMillis){ … fetchSemanticsNodes() }`.
  */
@@ -60,11 +64,14 @@ class BrainInstrumentedTest {
         // id → (kind, text). Newest first: index 0 is newest.
         val rows = mutableListOf<Triple<String, String, String>>() // id, kind, text
         var seq = 100
+        // id → the agent-written provenance JSON fragment (source_region array + job_id).
+        val agentWritten = mutableMapOf<String, String>()
         fun toJson(filter: String?): String {
             val matched = if (filter.isNullOrBlank()) rows else rows.filter { it.third.contains(filter, true) }
             return matched.joinToString(prefix = "[", postfix = "]") { (id, kind, text) ->
+                val provenance = agentWritten[id] ?: """"source_region":null,"job_id":null"""
                 """{"id":"$id","space_slug":"work","kind":"$kind","text":${text.quote()},""" +
-                    """"tags":[],"source_canvas_id":null,"source_region":null,"job_id":null,""" +
+                    """"tags":[],"source_canvas_id":null,$provenance,""" +
                     """"created_at":"2026-09-21T00:00:00Z"}"""
             }
         }
@@ -79,7 +86,11 @@ class BrainInstrumentedTest {
     @Before
     fun setUp() {
         brain.rows.clear()
+        brain.agentWritten.clear()
         brain.rows.add(Triple("b2", "fact", "Q3 offsite: Austin, 14 Oct"))
+        // Written by the model from a canvas.extract: Rect array region + the producing job.
+        brain.agentWritten["b2"] =
+            """"source_region":[0.1,0.2,0.3,0.4],"job_id":"00000000-0000-0000-0000-0000000000a1""""
         brain.rows.add(Triple("b1", "task", "lunch menu"))
 
         server = MockWebServer()
