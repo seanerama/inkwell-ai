@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.19
+
+### Other
+- Stage 30: brain listing accepts the Rect array; brain_search falls back to OR matching (#66)
+- CHANGELOG: 0.0.18
+- Release v0.0.18: STATUS staging (Phase 5 brain shipped; recall proven; listing 500 → stage 30)
+
 ## 0.0.18
 
 ### Other
