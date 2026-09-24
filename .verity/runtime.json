@@ -1,13 +1,13 @@
 {
-  "version": "0.0.18",
-  "deployed_at": "2026-09-16T19:29:06Z",
-  "rollback_from": "ghcr.io/seanerama/inkwell-ai-server@sha256:a14c331d6f3cc29dc0b23046a4433e5ef8d3cf27832e22cd215e85ea30338a34 (v0.0.17) + data set /srv/inkwell/backups/staging/20260921T193453Z-pre-deploy (taken before migration 0006)",
+  "version": "0.0.19",
+  "deployed_at": "2026-09-24T17:07:02Z",
+  "rollback_from": "ghcr.io/seanerama/inkwell-ai-server@sha256:84df6d722116ae0620b8001bb0f0c01d2856613ff053ec27a1e65a7a9ccfa902 (v0.0.18) + data set /srv/inkwell/backups/staging/20260924T170653Z-pre-deploy (no migration in v0.0.19)",
   "environments": {
     "staging": {
-      "status": "deployed v0.0.18 by digest (stages 25–29: brain store/recall/device view, Settings reachable, inbox backfill+Resync); all three release lanes green; migration 0006 applied; pre-deploy backup; canary passed; Playwright smoke 3/3; brain recall proven server-side; brain listing 500 on agent-written entries (stage 30)",
+      "status": "deployed v0.0.19 by digest (stage 30: brain listing accepts the Rect array; brain_search OR fallback); all three release lanes green; no migration; pre-deploy backup; canary passed; Playwright smoke 3/3; GET /brain/work 200 with 2 agent-written entries (was 500 on v0.0.18); 4-word query returns both via OR",
       "url": "https://mini-hp01.taile0ffc4.ts.net:8444",
-      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:84df6d722116ae0620b8001bb0f0c01d2856613ff053ec27a1e65a7a9ccfa902",
-      "deployed_at": "2026-09-21T19:37:32Z"
+      "image": "ghcr.io/seanerama/inkwell-ai-server@sha256:b46505f75652f3dcda566a623629a468c19cb5fee8afa096ca4851013e898716",
+      "deployed_at": "2026-09-24T17:07:02Z"
     },
     "prod": {
       "status": "not deployed"
@@ -17,7 +17,6 @@
     "ANTHROPIC_API_KEY, POSTGRES_PASSWORD, INKWELL_TOKEN_PEPPER, INKWELL_BLOB_SIGNING_KEY @ mini-hp01:/srv/inkwell/<env>/.env (mode 600; canonical copies in the operator's password manager)",
     "ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD @ GitHub Actions secrets on seanerama/inkwell-ai; offline backup ~/.verity/secrets/inkwell-ai/ on the operator workstation",
     "Staging backup sets @ mini-hp01:/srv/inkwell/backups/staging/<set>/ (db.dump, blobs.tar.zst, manifest.json; mode 700; latest symlink)",
-    "Staging .env rollback copy @ mini-hp01:/srv/inkwell/staging/.env.bak-20260917T171052Z (holds the pre-rotation blob key; delete after stage 20 lands)",
     "Staging .env rollback copy @ mini-hp01:/srv/inkwell/staging/.env.bak-20260918T123201Z (pre-rotation pepper, now retired; delete after 2026-09-25)",
     "Staging agent-kind push token (push-api-smoke) @ mini-hp01:/srv/inkwell/staging/agent-token.txt (mode 600; revoke with inkwell token revoke when no longer needed)"
   ],
@@ -37,7 +36,8 @@
     "2026-09-21: Phase 4 acceptance met on the tablet (v0.0.16): a CLI push landed within 10 s (sync + blob GET 200), the owner annotated the pushed PDF and Ask's answer referenced the plan's content. Multi-page folder and restart checks pending until stage 24's backfill surfaces the 2026-09-18 pushes.",
     "v0.0.17 (stage 24, owner-built) deployed to staging 2026-09-21 by digest; server code identical to v0.0.16. Nightly timer backups confirmed on 09-19, 09-20, 09-21. Tablet check pending: after installing the v0.0.17 APK the five 2026-09-18 pushes (learning: Q3 network plan; work: Three pages p1–p3 + Pushed over HTTP; home: Blank from API) should backfill on first sync — completes the pending rows in smoke/push-inbox.md. Prod NOT promoted.",
     "2026-09-21: after an app restart the tablet materialised the two re-pushes (3-page folder + Q3 plan copy); pages of the 3-page fixture are blank by construction. The pre-restart stall (same cursor every poll, no downloads) is in-process state — tracked in stage 29 (#59). Settings entry gap → stage 28 (#58).",
-    "v0.0.18 (stages 25–29) deployed to staging 2026-09-21 by digest. Kill-switch flips: BRAIN_ENABLED=true and AGENT_TOOLS_ENABLED=true in staging .env (deliberate). Phase 5 acceptance proven server-side: canvas.extract on one canvas wrote 2 facts; canvas.ask on a different canvas answered 'Austin, 14 Oct' via <brain_context>. Two defects: GET /brain/{slug} returns 500 whenever agent-written entries (array source_region) are in the result — the tablet Brain view will fail until stage 30 lands; brain_search AND-matching returned 0 for a 4-word query (stage 30). Brain routes otherwise pass (POST/idempotent/DELETE/auth). Tablet checks pending on the v0.0.18 APK: Settings gear on Library (stage 28), Resync surfaces the 2026-09-18 pushes (stage 29), Remember → Ask recall (Brain view will error). Prod NOT promoted."
+    "v0.0.18 (stages 25–29) deployed to staging 2026-09-21 by digest. Kill-switch flips: BRAIN_ENABLED=true and AGENT_TOOLS_ENABLED=true in staging .env (deliberate). Phase 5 acceptance proven server-side: canvas.extract on one canvas wrote 2 facts; canvas.ask on a different canvas answered 'Austin, 14 Oct' via <brain_context>. Two defects: GET /brain/{slug} returns 500 whenever agent-written entries (array source_region) are in the result — the tablet Brain view will fail until stage 30 lands; brain_search AND-matching returned 0 for a 4-word query (stage 30). Brain routes otherwise pass (POST/idempotent/DELETE/auth). Tablet checks pending on the v0.0.18 APK: Settings gear on Library (stage 28), Resync surfaces the 2026-09-18 pushes (stage 29), Remember → Ask recall (Brain view will error). Prod NOT promoted.",
+    "v0.0.19 (stage 30) deployed to staging 2026-09-24 by digest; release lanes green (server-image+Trivy, android-apk, android-instrumented); no migration; pre-deploy backup 20260924T170653Z-pre-deploy; canary canvas.ask done (1 annotation, 1 card); Playwright smoke 3/3 (run with NODE_PATH to a sibling project's playwright — this repo has no playwright dependency). Stage 30 verified live: GET /brain/work 200 returning both agent-written entries with array source_region (500 on v0.0.18); q='Q3 offsite date location' returns both via the OR fallback. Tablet check pending on the v0.0.19 APK: Brain view lists entries, Remember → Ask recall. Removed the stale .env.bak-20260917T171052Z secret row (deleted on the host 2026-09-18). Prod NOT promoted: golive BLOCKED (security-invariants.md and recovery-plan.md missing; ANTHROPIC_API_KEY rotation unconfirmed; off-host BACKUP_REMOTE unset)."
   ],
   "secrets": []
 }
