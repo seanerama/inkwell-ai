@@ -91,8 +91,9 @@ class AgentCall:
     raw_text: str
     input_tokens: int
     output_tokens: int
-    # Stage 26: one {"query", "count"} per brain_search executed during this call's tool
-    # loop (empty on the byte-identical no-tools path). Surfaced as result.brain_lookups.
+    # Stage 26: one {"query", "count", "mode"} per brain_search executed during this call's
+    # tool loop (empty on the byte-identical no-tools path). Surfaced as
+    # result.brain_lookups; "mode" ("and" | "or") was added in Stage 30.
     brain_lookups: list[dict] = field(default_factory=list)
 
 

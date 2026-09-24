@@ -342,6 +342,15 @@ when it is off, all three return `403 { error.code: "disabled" }`, and the
   (weight A) and tags (weight B), ranked by `ts_rank_cd` then `created_at desc`; a `q`
   with no match returns `[]`. Without `q`, the newest entries first.
 
+- **Stage 30 clarification (2026-09-24)** — text only; no route, field or schema change.
+  `BrainEntry.source_region` is the agent-output `Rect` — the array `[x, y, w, h]`,
+  normalised 0–1 — or `null`; it is never an object. (It is the `source_region` of the
+  `brain_writes` item that produced the row.) For `GET /brain/{space_slug}?q=`, when the
+  `websearch_to_tsquery` (AND) match above returns nothing and `q` normalises to more than
+  one term, the server retries with the same terms OR-ed (any term matches), ranked the
+  same way (`ts_rank_cd`, then `created_at desc`); a single-term `q` is unchanged. The
+  agent's `brain_search` tool uses the same search.
+
 - **`POST /brain/{space_slug}`** body `{ kind, text (1–2000), tags?, source_canvas_id? }`
   → `201 BrainEntry`. **Idempotent:** when a live entry with the same normalised text
   already exists in the space, the route returns `200` with that existing entry rather

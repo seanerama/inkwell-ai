@@ -199,7 +199,9 @@ class BrainEntry(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
     source_canvas_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    source_region: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The contract's Rect: [x, y, w, h] normalised 0–1 (stored JSONB array; Stage 30
+    # corrected this hint from ``dict`` — no migration, the stored value was always an array).
+    source_region: Mapped[list[float] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

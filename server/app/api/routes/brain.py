@@ -1,7 +1,9 @@
 """Brain routes (Stage 25 — the three frozen ``/brain/{space_slug}`` routes, ADR-0013).
 
 Full-text search over ``brain_entries`` (Postgres ``websearch_to_tsquery`` ranked by
-``ts_rank_cd``, ties by recency), idempotent create, and soft delete. All three are
+``ts_rank_cd``, ties by recency; Stage 30: a multi-term ``q`` with no AND match falls
+back to OR matching — ``app.brain.store.search_brain``), idempotent create, and soft
+delete. All three are
 device-token only and gated by the ``BRAIN_ENABLED`` kill-switch: when off they return
 ``403`` with ``error.code="disabled"``. Soft-deleted rows are never returned.
 """
@@ -14,13 +16,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, literal_column, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_token
 from app.api.errors import ApiError
 from app.api.schemas import BrainEntryOut
-from app.brain.store import create_entry
+from app.brain.store import create_entry, search_brain
 from app.config import get_settings
 from app.db.models import BrainEntry, DeviceToken, Space
 
@@ -61,23 +63,8 @@ def list_brain(
     _require_space(db, space_slug)
     limit = max(1, min(limit, _LIMIT_MAX))
 
-    stmt = (
-        select(BrainEntry)
-        .where(BrainEntry.space_slug == space_slug)
-        .where(BrainEntry.deleted_at.is_(None))
-    )
-    if q and q.strip():
-        tsquery = func.websearch_to_tsquery("english", q)
-        search = literal_column("search")
-        stmt = (
-            stmt.where(search.op("@@")(tsquery))
-            .order_by(func.ts_rank_cd(search, tsquery).desc(), BrainEntry.created_at.desc())
-            .limit(limit)
-        )
-    else:
-        stmt = stmt.order_by(BrainEntry.created_at.desc()).limit(limit)
-
-    rows = db.execute(stmt).scalars().all()
+    # The shared search (AND first, OR fallback for a multi-term q with no AND hit).
+    rows = search_brain(db, space_slug, q, limit=limit).entries
     return [BrainEntryOut.model_validate(r) for r in rows]
 
 

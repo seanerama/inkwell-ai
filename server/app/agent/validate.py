@@ -41,7 +41,8 @@ class AgentRun:
     input_tokens: int
     output_tokens: int
     coordinate_clamps: int
-    # Stage 26: {"query", "count"} per brain_search across all attempts (traceability).
+    # Stage 26: {"query", "count", "mode"} per brain_search across all attempts
+    # (traceability; "mode" = "and" | "or" since Stage 30).
     brain_lookups: list[dict] = field(default_factory=list)
 
 
