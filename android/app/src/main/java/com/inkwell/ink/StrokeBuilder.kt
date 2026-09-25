@@ -57,7 +57,12 @@ class StrokeBuilder(
     private val filterX = OneEuroFilter(minCutoff, beta)
     private val filterY = OneEuroFilter(minCutoff, beta)
 
-    private val values = ArrayList<Float>()
+    // Stage 31: a grow-only FloatArray (stride 5) instead of a boxed list, so the wet
+    // layer can read the live stroke without a per-event copy (see [liveBuffer]). A fresh
+    // array is allocated on every [start] and on every growth, and indices below the
+    // published count are never rewritten, so a reader on another thread that holds an
+    // older (array, count) pair always sees stable values.
+    private var values = FloatArray(INITIAL_CAPACITY_FLOATS)
     private var count = 0
     private var startTimeMs = 0L
     private var started = false
@@ -75,7 +80,7 @@ class StrokeBuilder(
     fun start(eventTimeMs: Long) {
         filterX.reset()
         filterY.reset()
-        values.clear()
+        values = FloatArray(INITIAL_CAPACITY_FLOATS)
         count = 0
         startTimeMs = eventTimeMs
         started = true
@@ -104,11 +109,15 @@ class StrokeBuilder(
         if (relT < lastRelT) relT = lastRelT
         lastRelT = relT
 
-        values.add(fx)
-        values.add(fy)
-        values.add(pressure)
-        values.add(tilt)
-        values.add(relT)
+        val base = count * PackedPoints.STRIDE
+        if (base + PackedPoints.STRIDE > values.size) {
+            values = values.copyOf(values.size * 2)
+        }
+        values[base] = fx
+        values[base + 1] = fy
+        values[base + 2] = pressure
+        values[base + 3] = tilt
+        values[base + 4] = relT
         count++
 
         if (fx < minX) minX = fx
@@ -118,12 +127,20 @@ class StrokeBuilder(
     }
 
     /** Snapshot the packed stride-5 array so far (for the live overlay). */
-    fun snapshotPoints(): FloatArray = values.toFloatArray()
+    fun snapshotPoints(): FloatArray = values.copyOf(count * PackedPoints.STRIDE)
+
+    /**
+     * Stage 31: a zero-copy view of the points so far for the front-buffered wet layer,
+     * which draws on its own render thread. Only the first [LivePoints.pointCount]
+     * points of [LivePoints.points] are meaningful; they are never rewritten (see the
+     * storage note above), so the pair is safe to hand to another thread.
+     */
+    fun liveBuffer(): LivePoints = LivePoints(values, count)
 
     /** Finish the stroke. Returns null if no samples were captured. */
     fun build(): BuiltStroke? {
         if (count == 0) return null
-        val points = values.toFloatArray()
+        val points = values.copyOf(count * PackedPoints.STRIDE)
         require(points.size == count * PackedPoints.STRIDE) {
             "stride invariant broken: ${points.size} != $count * ${PackedPoints.STRIDE}"
         }
@@ -136,4 +153,15 @@ class StrokeBuilder(
             bboxH = maxY - minY,
         )
     }
+
+    private companion object {
+        const val INITIAL_CAPACITY_FLOATS = 256 * PackedPoints.STRIDE
+    }
 }
+
+/**
+ * Stage 31: an immutable-by-convention window onto a [StrokeBuilder]'s live points:
+ * stride-5 filtered points in canvas units, of which the first [pointCount] are valid.
+ * Never mutate [points]; it may be shared with the builder that produced it.
+ */
+class LivePoints(val points: FloatArray, val pointCount: Int)

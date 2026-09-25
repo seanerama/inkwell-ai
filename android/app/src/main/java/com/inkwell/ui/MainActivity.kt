@@ -235,6 +235,12 @@ class MainActivity : ComponentActivity() {
                                     viewModel = pairingViewModel,
                                     inboxStatus = if (showInbox) libraryViewModel.inboxStatus else null,
                                     onResyncInbox = if (showInbox) libraryViewModel::resyncInbox else null,
+                                    // Stage 31: the Ink switches (low-latency pen, smoothing).
+                                    inkPrefs = if (BuildConfig.LOW_LATENCY_INK) {
+                                        com.inkwell.ink.InkPrefs.from(applicationContext)
+                                    } else {
+                                        null
+                                    },
                                 )
                             }
                         }

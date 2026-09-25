@@ -13,6 +13,7 @@ import com.inkwell.ink.InkView
 import com.inkwell.ink.StrokeCommit
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Before
@@ -27,6 +28,11 @@ import org.junit.runner.RunWith
  *
  * Point-count arithmetic (§9.2(2): historical samples are never dropped):
  *   DOWN (1) + MOVE with historySize 2 (2 + 1 current = 3) + UP (1) = 5.
+ *
+ * Stage 31: the same synthetic stroke with the low-latency pen **on** (unbuffered input,
+ * motion prediction recorded and predicted) persists exactly the same points as with it
+ * **off** — predicted points never reach storage (contract `ink-storage`). The attached
+ * wet-layer variants live in `LowLatencyInkInstrumentedTest`.
  */
 @RunWith(AndroidJUnit4::class)
 class InkCaptureInstrumentedTest {
@@ -75,6 +81,56 @@ class InkCaptureInstrumentedTest {
         downTime, eventTime, action, 1, stylusProps(), arrayOf(c),
         0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_STYLUS, 0,
     )
+
+    /** Inject the canonical DOWN + MOVE(history 2) + UP stroke and return its commit. */
+    private fun captureSyntheticStroke(lowLatency: Boolean): StrokeCommit {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val instr = InstrumentationRegistry.getInstrumentation()
+        var committed: StrokeCommit? = null
+        lateinit var view: InkView
+        instr.runOnMainSync {
+            view = InkView(context).apply {
+                setCanvasSize(2480, 3508)
+                this.lowLatency = lowLatency
+                onStrokeCommitted = { committed = it }
+            }
+        }
+        val t0 = 1000L
+        instr.runOnMainSync {
+            view.onTouchEvent(event(t0, t0, MotionEvent.ACTION_DOWN, coords(100f, 100f, 0.5f, 0.1f)))
+            val move = event(t0, t0 + 16, MotionEvent.ACTION_MOVE, coords(110f, 120f, 0.6f, 0.1f))
+            move.addBatch(t0 + 32, arrayOf(coords(130f, 150f, 0.7f, 0.1f)), 0)
+            move.addBatch(t0 + 48, arrayOf(coords(160f, 190f, 0.8f, 0.1f)), 0)
+            view.onTouchEvent(move)
+            view.onTouchEvent(event(t0, t0 + 64, MotionEvent.ACTION_UP, coords(200f, 240f, 0.4f, 0.1f)))
+        }
+        return requireNotNull(committed) { "a stroke must be committed on pen-up (lowLatency=$lowLatency)" }
+    }
+
+    @Test
+    fun low_latency_on_persists_the_same_points_as_off() {
+        val off = captureSyntheticStroke(lowLatency = false)
+        val on = captureSyntheticStroke(lowLatency = true)
+
+        assertEquals(5, off.stroke.pointCount)
+        assertEquals("same point count with low-latency on", off.stroke.pointCount, on.stroke.pointCount)
+        assertArrayEquals("same points with low-latency on", off.stroke.points, on.stroke.points, 0f)
+        assertEquals(off.stroke, on.stroke)
+
+        // Persisted with low-latency on: exactly one stroke, identical blob contents.
+        runBlocking {
+            val state = repo.openDefaultCanvas()
+            repo.insertStroke(
+                layerId = state.inkLayerId,
+                commit = StrokeCommitData(on.stroke, on.tool, on.colorHex, on.widthCu),
+            )
+            val reloaded = repo.loadStrokes(state.inkLayerId)
+            assertEquals(1, reloaded.size)
+            assertEquals(5, reloaded.first().pointCount)
+            val decoded = com.inkwell.data.PackedPoints.decode(reloaded.first().points, 5)
+            assertArrayEquals(off.stroke.points, decoded, 0f)
+        }
+    }
 
     @Test
     fun synthetic_stylus_stroke_with_history_persists_one_stroke() {

@@ -45,11 +45,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.inkwell.BuildConfig
+import com.inkwell.ink.InkPrefs
+import com.inkwell.ink.InkSettings
+import com.inkwell.ink.InkSurfaceHost
 import com.inkwell.ink.InkView
 
 /**
@@ -64,6 +68,11 @@ import com.inkwell.ink.InkView
  * a minimal **layer tray** with a per-layer visibility toggle so the agent layer can be
  * hidden to judge placement. The agent layer renders through
  * [com.inkwell.render.AnnotationRenderer].
+ *
+ * Stage 31: the Settings "Ink" switches ([InkPrefs], behind [BuildConfig.LOW_LATENCY_INK])
+ * are read once when the canvas opens. With "Low-latency pen" on, the canvas hosts an
+ * [InkSurfaceHost] (InkView + the front-buffered wet layer); otherwise a bare [InkView]
+ * exactly as before. The smoothing preset sets the one-euro knobs either way.
  */
 @Composable
 fun CanvasScreen(
@@ -77,9 +86,20 @@ fun CanvasScreen(
     // Stage 27: opens the per-space Brain view (the "View in Brain" snackbar action after a
     // save_to_brain). Null → the snackbar shows without the action (e.g. flag-OFF path).
     onOpenBrain: (() -> Unit)? = null,
+    // Stage 31: the ink switches to apply; null → read InkPrefs when the canvas opens
+    // (defaults — pen path unchanged, Standard smoothing — when LOW_LATENCY_INK is off).
+    inkSettings: InkSettings? = null,
 ) {
     val config = LocalConfiguration.current
     val landscape = config.screenWidthDp >= config.screenHeightDp
+    val context = LocalContext.current
+    val ink = remember(inkSettings) {
+        inkSettings ?: if (BuildConfig.LOW_LATENCY_INK) {
+            InkSettings.from(InkPrefs.from(context))
+        } else {
+            InkSettings()
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         if (onBack != null) {
@@ -92,7 +112,13 @@ fun CanvasScreen(
                 AndroidView(
                     modifier = Modifier.fillMaxSize().testTag(CanvasTags.SURFACE),
                     factory = { ctx ->
-                        InkView(ctx).apply {
+                        // Stage 31: the wet layer is only created when the switch is on.
+                        val host = if (ink.lowLatencyPen) InkSurfaceHost(ctx) else null
+                        val inkView = host?.inkView ?: InkView(ctx)
+                        inkView.apply {
+                            lowLatency = ink.lowLatencyPen
+                            minCutoff = ink.smoothing.minCutoff
+                            beta = ink.smoothing.beta
                             onStrokeCommitted = { viewModel.onStrokeCommitted(it) }
                             onEraseStroke = { viewModel.onEraseStroke(it) }
                             // Stage 10: a finger tap on an agent mark scrolls the panel to
@@ -100,8 +126,10 @@ fun CanvasScreen(
                             onAnchorTap = { xCu, yCu -> viewModel.onCanvasTapCu(xCu, yCu) }
                             this.debugEnabled = debugEnabled
                         }
+                        host ?: inkView
                     },
-                    update = { view ->
+                    update = { root ->
+                        val view = (root as? InkSurfaceHost)?.inkView ?: root as InkView
                         view.tool = viewModel.tool
                         view.colorHex = viewModel.colorHex
                         view.widthCu = viewModel.widthCu

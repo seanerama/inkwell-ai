@@ -73,3 +73,18 @@ defaults and removes the Standard path if it is no longer needed.
 - Jetpack Ink adoption, after the Android toolchain refresh (Revisit proposal 11), and only
   if stage 31 is not enough.
 - Front-buffered marker (would need a whole-stroke redraw per frame on the wet layer).
+
+## Chosen RESPONSIVE values (stage 31 build)
+
+`SmoothingPreset.RESPONSIVE` is `minCutoff = 3.0 Hz`, `beta = 0.02`: the starting point,
+kept. A simulated slow diagonal (60 CU/s, 240 Hz, 1 CU σ digitizer noise):
+
+| Preset | Lag behind the nib | Perpendicular jitter left |
+|---|---|---|
+| STANDARD (1.0 / 0.007) | ~41 ms | ~0.21 CU RMS |
+| RESPONSIVE (3.0 / 0.02) | ~22 ms | ~0.29 CU RMS (≈0.025 mm, ~1/10 of the 3 CU pen) |
+
+Going further buys little. With beta 0.03 or minCutoff 4.0 the lag drops by ≤ 3 ms
+more, and the jitter keeps rising. `SmoothingPresetTest` pins both properties: less lag,
+and jitter below 0.5 CU. The owner's slow-diagonal row in
+`smoke/android-low-latency-ink.md` is the real check.
