@@ -47,7 +47,10 @@ data class ExportRaster(
  *     message (contract §Export step 3 / `device-api` 413).
  *
  * Rendering reuses [LayerRenderer] (the Stage 3 renderer) through a CU→EX scale
- * transform so the exported pixels match what the user sees on the canvas.
+ * transform so the exported pixels match what the user sees on the canvas. Stage 32: the
+ * renderer is tiled, but the export pins it to LOD 0 and page (0,0), so each ink layer is
+ * still a full-resolution page raster downsampled into the export — byte-identical to
+ * before (`CanvasExportParityInstrumentedTest`) — with one page bitmap shared by all layers.
  */
 object CanvasExporter {
 
@@ -149,21 +152,32 @@ object CanvasExporter {
             layers.filter { it.visible }.forEach { add(DrawOp.Ink(it.z, it)) }
             rasters.filter { it.visible }.forEach { add(DrawOp.Raster(it.z, it)) }
         }
-        for (op in ExportComposition.ordered(ops)) {
-            when (op) {
-                is DrawOp.Ink -> {
-                    val renderer = LayerRenderer()
-                    renderer.setCanvasSize(widthCu, heightCu)
-                    renderer.setCommittedStrokes(op.layer.strokes)
-                    renderer.draw(canvas, transform)
-                    renderer.release()
-                }
-                is DrawOp.Raster -> {
-                    val rect = RasterFit.destRectPx(op.raster.placement, scale, 0f, 0f)
-                    dst.set(rect.left, rect.top, rect.right, rect.bottom)
-                    canvas.drawBitmap(op.raster.bitmap, null, dst, rasterPaint)
+        // Stage 32: ONE renderer for every ink layer, pinned to LOD 0 (1 px/CU) so each layer
+        // is still rasterised at full resolution and downsampled exactly as before
+        // (byte-identical PNG, contract `coordinate-mapping`). Its single page tile is
+        // reused across layers (rebuilt per layer) instead of allocating a page-sized
+        // bitmap per layer. Export stays page (0,0) until stage 35 (region export).
+        val renderer = LayerRenderer().apply {
+            fixedLod = 0
+            setCanvasSize(widthCu, heightCu)
+        }
+        try {
+            for (op in ExportComposition.ordered(ops)) {
+                when (op) {
+                    is DrawOp.Ink -> {
+                        renderer.setCommittedStrokes(op.layer.strokes)
+                        renderer.invalidateAll()
+                        renderer.draw(canvas, transform)
+                    }
+                    is DrawOp.Raster -> {
+                        val rect = RasterFit.destRectPx(op.raster.placement, scale, 0f, 0f)
+                        dst.set(rect.left, rect.top, rect.right, rect.bottom)
+                        canvas.drawBitmap(op.raster.bitmap, null, dst, rasterPaint)
+                    }
                 }
             }
+        } finally {
+            renderer.release()
         }
         return bmp
     }
