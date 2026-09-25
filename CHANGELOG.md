@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.20
+
+### Other
+- Stage 31: low-latency ink — front-buffered pen wet layer, motion prediction, unbuffered input, responsive smoothing (switches default off) (#68)
+- Plan stage 31: low-latency ink (front-buffered pen, motion prediction, unbuffered input, responsive smoothing; switches default off)
+- Release: publish the image and APK only after the instrumented lane is green
+- Plan: assess Revisit proposal 1 (binding CI gates) — not a stage; operator changes A (branch protection) and B (release needs instrumented)
+- CHANGELOG: 0.0.19
+- Release v0.0.19: STATUS staging (stage 30 brain listing + OR search verified live; smoke 3/3)
+
 ## 0.0.19
 
 ### Other
