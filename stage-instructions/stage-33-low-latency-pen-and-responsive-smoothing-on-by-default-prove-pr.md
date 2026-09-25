@@ -1,7 +1,7 @@
 # Stage 33: Low-latency pen and Responsive smoothing on by default; prove prediction isolation on the wet path
 
 - **Type:** chore
-- **Depends on:** 32
+- **Depends on:** 31
 - **Work-item:** https://github.com/seanerama/inkwell-ai/issues/70
 - **Design:** `feature-assessments/low-latency-ink-assessment.md` ("a later small stage flips
   the defaults"); PR #68 review follow-ups 1 and 2; contract `ink-storage`. Code:
@@ -9,6 +9,8 @@
   `androidTest/.../LowLatencyInkInstrumentedTest.kt`, `InkCaptureInstrumentedTest.kt`.
 
 ## Objectives
+
+_Re-pointed 2026-09-25: this stage originally depended on the old stage 32 only so the two would not edit the same files at once. ADR-0014 repurposed stage 32, so this stage now builds on 31._
 
 The owner ran the stage 31 feel test on v0.0.20 (2026-09-25): "I like the responsive and low
 latency, let's make that the default". After this stage, a fresh install writes with the

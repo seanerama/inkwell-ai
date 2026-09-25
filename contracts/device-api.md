@@ -367,3 +367,26 @@ when it is off, all three return `403 { error.code: "disabled" }`, and the
   `done` and bumping the parent job. The response is the card as before **plus a
   `brain_entry_id` sibling** (the created or existing entry's id). With the switch off it
   is unchanged: `422 not_implemented`.
+
+## ADR-0014 additions — expandable canvases (2026-09-25)
+
+Additive. No new route, no changed response shape.
+
+- **`POST /jobs` `export`** gains two optional integer fields, **`origin_x_cu`** and
+  **`origin_y_cu`** (default `0`, may be negative). `width_cu`/`height_cu` describe the
+  exported **region** (contract `coordinate-mapping`, ADR-0014 additions).
+  - A request without the new fields means exactly what it meant before.
+  - The server stores `export` as given; `GET /jobs/{id}` returns it in `request.export`
+    unchanged.
+  - Example (a region one page right of the first page's origin):
+    `"export": { "w": 1568, "h": 1109, "width_cu": 3508, "height_cu": 2480,
+    "origin_x_cu": 2480, "origin_y_cu": 0 }`.
+- **`canvas.formalize` result canvas size.** The created agent-origin canvas takes its
+  `width_cu`/`height_cu` from the request's `export.width_cu`/`export.height_cu` (the
+  exported region), falling back to the source canvas and then to 2480×3508. The
+  formalized geometry therefore maps 1:1 onto the new single-page canvas at origin
+  `(0,0)`.
+- **Canvases returned by the server** (`GET /canvases`, canvas detail, push results) are
+  single-page. Their `width_cu`/`height_cu` are the page size (contract `ink-storage`,
+  ADR-0014 additions); the device treats them as grid `0,0,0,0`. The page grid is
+  device-local and not part of this API.

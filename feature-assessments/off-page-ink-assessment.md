@@ -10,6 +10,14 @@
     review gaps.
   - Stage 33 depends on 32. Both touch `InkView` and `WetInkLayer`, so they run in series.
 
+> **Superseded (2026-09-25, same day):** the owner does not want a fixed page ("expand as
+> needed, similar to how Visio works"). ADR-0014 makes canvases grow by pages. The stage 32
+> fix described below (refuse off-page starts, clip at the page edge) is **replaced** by
+> `feature-assessments/expandable-canvas-assessment.md`: stage 32 was repurposed as the
+> page-grid foundation, and stages 34 and 35 were added. The claim/reality table below still
+> holds as the diagnosis. The stage 33 notes still apply, except that stage 33 now depends
+> on 31.
+
 ## Claim / reality for the bug (verified 2026-09-25)
 
 | Claim | Checked | Reality |

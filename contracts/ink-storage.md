@@ -47,6 +47,27 @@ Width modulation (`width_cu * (0.3 + 0.7 * p)`) is a render-time function of sto
 Room database version starts at `1`. Every schema change ships a `Migration`; a
 destructive fallback is forbidden in release builds.
 
+## ADR-0014 additions — page grid (2026-09-25)
+
+Additive: widened range plus new columns with defaults. Every existing row stays valid
+with unchanged meaning.
+
+- **`CanvasEntity.width_cu` / `height_cu` are the page size.** A canvas is a grid of equal
+  pages. New integer columns `page_min_col`, `page_max_col`, `page_min_row` and
+  `page_max_row` (NOT NULL, default `0`, with `page_min_* ≤ 0 ≤ page_max_*`) give the
+  grid. Page `(c, r)` covers `[c·width_cu, (c+1)·width_cu) × [r·height_cu, (r+1)·height_cu)`.
+  Each axis is capped at 8 pages (`page_max − page_min + 1 ≤ 8`). This ships as a Room
+  schema **v5** migration with defaults; destructive fallback is still forbidden.
+- **Stroke `x`,`y` range (widened).** Coordinates are canvas units in the same space as
+  before, now bounded by the grid: `page_min_col·width_cu ≤ x < (page_max_col+1)·width_cu`,
+  and likewise for `y`. **Negative values are valid.** A pre-v5 canvas (grid `0,0,0,0`)
+  keeps exactly the old range. The stride, units, byte order, filtering rule and
+  width-modulation rule are unchanged.
+- **Growth is recorded, never inferred.** The grid only grows (ADR-0014 §2), and it
+  always covers every committed stroke's bbox up to the cap. The v5 migration grows the
+  grid of any canvas whose existing strokes lie off page `(0,0)` so that it covers their
+  bboxes, capped. It never moves or edits stored points.
+
 ## Versioning
 
 Frozen at **v1**. Changes are **additive only** — a breaking change is a NEW
