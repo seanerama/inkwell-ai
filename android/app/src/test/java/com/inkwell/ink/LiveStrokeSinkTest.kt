@@ -71,6 +71,22 @@ class LiveStrokeSinkTest {
         assertEquals(builder.build(), sink.finish())
     }
 
+    @Test
+    fun counts_predicted_samples_received_without_touching_the_stroke() {
+        val sink = LiveStrokeSink(3.0, 0.02)
+        sink.start(1000L)
+        assertEquals(0, sink.predictedSamplesReceived)
+        for (s in real.take(5)) {
+            sink.addReal(s.x, s.y, s.p, s.tilt, s.t)
+            sink.setPredicted(predictedTailAfter(s)) // 3 samples each
+        }
+        sink.clearPredicted()
+        assertEquals(15, sink.predictedSamplesReceived)
+        assertEquals(5, sink.pointCount) // only the real samples were built
+        sink.finish()
+        assertEquals("the count survives pen-up for the test hook", 15, sink.predictedSamplesReceived)
+    }
+
     @Test(expected = IllegalArgumentException::class)
     fun a_malformed_tail_is_rejected() {
         LiveStrokeSink(1.0, 0.007).setPredicted(FloatArray(7))

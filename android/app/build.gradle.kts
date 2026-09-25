@@ -153,13 +153,13 @@ android {
             buildConfigField("boolean", "BRAIN", "true")
             // Low-latency ink kill-switch (Stage 31 compile-time gate, THIS stage's feature):
             // ON makes the Settings screen show an "Ink" section with two RUNTIME switches,
-            // persisted in InkPrefs and both default OFF — "Low-latency pen (experimental)"
+            // persisted in InkPrefs (stage 33: both default ON — "Low-latency pen"
             // (front-buffered wet pen layer + motion prediction + unbuffered input) and
-            // "Smoothing: Standard / Responsive" — which CanvasScreen applies when a canvas
-            // opens. OFF = no Ink section and every canvas uses today's pen path and Standard
+            // "Smoothing: Standard / Responsive", default Responsive) — which CanvasScreen
+            // applies when a canvas opens. OFF = the kill switch: no Ink section and every canvas uses today's pen path and Standard
             // smoothing. Documented release-ON exception (same rationale as LIBRARY/FORMALIZE/
             // …/BRAIN): default ON in debug AND release, because the owner judges the feel on
-            // the release APK and the runtime switches already default OFF. Flip to "false"
+            // the release APK (stage 33 made the runtime switches default on). Flip to "false"
             // to remove the controls (and the feature) without a code change.
             buildConfigField("boolean", "LOW_LATENCY_INK", "true")
         }
@@ -216,7 +216,7 @@ android {
             buildConfigField("boolean", "BRAIN", "true")
             // Stage 31 low-latency ink: ON in release by documented exception (see the debug
             // block and the stage-31 spec) — the owner A/Bs the feel on the release APK. The
-            // runtime switches in Settings still default OFF / Standard. Flip to "false" to
+            // runtime switches in Settings default on / Responsive (stage 33). Flip to "false" to
             // hide the Ink settings and keep today's pen path without a code change.
             buildConfigField("boolean", "LOW_LATENCY_INK", "true")
             isMinifyEnabled = false

@@ -24,6 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -137,8 +139,9 @@ fun PairingScreen(
 }
 
 /**
- * Stage 31: the "Ink" settings — two runtime switches persisted in [InkPrefs], both off /
- * Standard by default, applied the next time a canvas opens.
+ * Stage 31: the "Ink" settings — two runtime switches persisted in [InkPrefs], applied the
+ * next time a canvas opens. Stage 33: both default on (low-latency pen, Responsive); a
+ * preference is written only when the owner changes it here.
  */
 @Composable
 private fun InkSection(prefs: InkPrefs) {
@@ -150,7 +153,10 @@ private fun InkSection(prefs: InkPrefs) {
     ) {
         Text("Ink", fontWeight = FontWeight.Bold)
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Text("Low-latency pen (experimental)", modifier = Modifier.weight(1f))
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Low-latency pen")
+                Text("Pen ink appears sooner, drawn slightly ahead of the nib while you write.")
+            }
             Switch(
                 checked = lowLatency,
                 onCheckedChange = {
@@ -175,13 +181,16 @@ private fun InkSection(prefs: InkPrefs) {
                     prefs.smoothing = preset
                 }
                 val tag = PairingTags.inkSmoothing(preset)
-                if (smoothing == preset) {
-                    Button(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(label) }
+                val chosen = smoothing == preset
+                val m = Modifier.testTag(tag).semantics { selected = chosen }
+                if (chosen) {
+                    Button(onClick = onClick, modifier = m) { Text(label) }
                 } else {
-                    OutlinedButton(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(label) }
+                    OutlinedButton(onClick = onClick, modifier = m) { Text(label) }
                 }
             }
         }
+        Text("Responsive follows the pen more closely; Standard smooths more.")
         Text("Applies the next time you open a canvas.")
     }
 }

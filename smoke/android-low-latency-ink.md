@@ -11,9 +11,14 @@ native client (ADR-0001), so this human pass is the replacement.
 
 - The compile gate `BuildConfig.LOW_LATENCY_INK` is **ON** (the default in both build
   types), so **Settings** (toolbar ⋮ → **Settings**) shows an **Ink** section with:
-  - **Low-latency pen (experimental)**, a switch, default **off**;
-  - **Smoothing:** **Standard** / **Responsive**, default **Standard**;
+  - **Low-latency pen**, a switch with a one-line explanation, **on by default** (since
+    stage 33);
+  - **Smoothing:** **Standard** / **Responsive**, **Responsive by default** (since stage
+    33), with a one-line explanation;
   - the note "Applies the next time you open a canvas."
+  On a **fresh install** (or after clearing app data) both are already on: config **D**
+  below is what a new owner gets without touching Settings. An install where you changed
+  a switch before keeps your explicit choice.
   (If a build has the gate flipped OFF, the Ink section is absent and the canvas uses
   today's pen path. That is the dark-launch state, not a failure of this smoke.)
 - A **debug** APK is installed for the latency numbers: only debug builds show the
@@ -31,10 +36,10 @@ Run every writing test below in the native app and in each Inkwell configuration
 
 | Config | Low-latency pen | Smoothing |
 |---|---|---|
-| **A** (today) | off | Standard |
+| **A** (pre-stage-31 path) | off | Standard |
 | **B** | on | Standard |
 | **C** | off | Responsive |
-| **D** | on | Responsive |
+| **D** (default since stage 33) | on | Responsive |
 
 ## Writing tests (per configuration)
 
@@ -86,6 +91,21 @@ Run every writing test below in the native app and in each Inkwell configuration
    the frame is handed to the compositor, so it understates the View path's real delay
    by about a frame.
 
+## Stage 33: the defaults, and turning each switch off
+
+10. **Fresh install.** Clear app data (or install fresh) and open Settings → Ink.
+    *Expected:* **Low-latency pen** is on and **Responsive** is selected. Open a canvas
+    and write: the debug overlay's `ink latency` path reads `wet`.
+11. **Turning each switch off still works.**
+    - Turn **Low-latency pen** off, go Back and re-open the canvas, write a word.
+      *Expected:* the pen still draws, with no predicted tail ahead of the nib, and the
+      debug overlay's `ink latency` path reads `view`, not `wet`.
+    - Pick **Standard**, go Back and re-open the canvas, draw the slow diagonal.
+      *Expected:* it draws as config A/B did (a little more lag than Responsive, no
+      jitter or segmentation).
+    - Restart the app and re-open Settings. *Expected:* both still show **off** and
+      **Standard**; the defaults never overwrite an explicit choice.
+
 ## Results
 
 Mark each cell ✓ (as expected), ✗ (problem, add a note) or a number where asked.
@@ -103,6 +123,9 @@ Mark each cell ✓ (as expected), ✗ (problem, add a note) or a number where as
 | Pan/zoom right after writing: no stray wet ink | n/a | | | | |
 | Rotation mid-session: ink intact, pen still accurate | n/a | | | | |
 | Debug `ink latency` (ms, and `wet`/`view`) | n/a | | | | |
+| 10. Fresh install shows Low-latency **on** and **Responsive** | n/a | n/a | n/a | n/a | |
+| 11. Low-latency turned **off** still draws (path `view`) and stays off after restart | n/a | | n/a | | n/a |
+| 11. **Standard** chosen still draws cleanly and stays chosen after restart | n/a | | | n/a | n/a |
 
 **Verdict** (circle one per row):
 
@@ -114,22 +137,25 @@ Mark each cell ✓ (as expected), ✗ (problem, add a note) or a number where as
 
 ## Pass criteria
 
+- [ ] A fresh install starts in config D (Low-latency on, Responsive) (check 10).
+- [ ] Turning each switch off still works and the choice persists (check 11).
 - [ ] No regression with both switches off (config A behaves exactly as before).
 - [ ] With Low-latency on: no gap, flicker or darkening at pen lift, and no ghost tail.
 - [ ] A stroke written with Low-latency on is identical after a reopen.
 - [ ] Palm rejection, marker, eraser, pan/zoom and rotation behave as before in all
       configs.
 - [ ] Responsive: the slow diagonal shows no visible jitter or segmentation.
-- [ ] Verdict rows filled in. If Inkwell is preferred with a switch on, a follow-up stage
-      flips that default (see `feature-assessments/low-latency-ink-assessment.md`).
+- [ ] Verdict rows filled in. (Stage 33 flipped both defaults on after the owner's
+      stage 31 verdict; see `feature-assessments/low-latency-ink-assessment.md`.)
 
 ## Kill-switch note
 
 `BuildConfig.LOW_LATENCY_INK` is the compile-time gate. It is **ON in debug and release**
-by documented exception (the owner judges the feel on the release APK). The two runtime
-switches default to **off** and **Standard**, so today's behaviour is unchanged until
-you opt in. Turning the gate **OFF** removes the Ink section and the low-latency path
-entirely. That is the dark-launch state, not a smoke failure.
+by documented exception (the owner judges the feel on the release APK). Since stage 33
+the two runtime switches default to **on** and **Responsive**; either can be turned off
+in Settings. Turning the gate **OFF** is the kill switch: it removes the Ink section, and
+every canvas uses the pre-stage-31 pen path with Standard smoothing, whatever the stored
+switches say. That is the dark-launch state, not a smoke failure.
 
 ---
 
