@@ -55,11 +55,7 @@ class LayerRenderer {
     private var committed: List<RenderStroke> = emptyList()
 
     private val matrix = Matrix()
-    private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
+    private val strokePaint = newStrokePaint()
     private val bitmapPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
     fun setCanvasSize(widthCu: Int, heightCu: Int) {
@@ -112,6 +108,30 @@ class LayerRenderer {
         }
     }
 
+    /**
+     * Stage 31: draw one extra overlay stroke (canvas units) through [transform], exactly
+     * as the live stroke is drawn. [com.inkwell.ink.InkView] uses it for finished pen
+     * strokes whose wet copy was dropped (pan/zoom, surface lost) until their dry copy
+     * reaches the cache.
+     */
+    fun drawOverlayStroke(
+        outCanvas: Canvas,
+        transform: CanvasTransform,
+        points: FloatArray,
+        tool: String,
+        color: Int,
+        widthCu: Float,
+    ) {
+        if (points.size < PackedPoints.STRIDE) return
+        matrix.reset()
+        matrix.setScale(transform.scale, transform.scale)
+        matrix.postTranslate(transform.tx, transform.ty)
+        outCanvas.save()
+        outCanvas.concat(matrix)
+        drawStroke(outCanvas, points, tool, color, widthCu)
+        outCanvas.restore()
+    }
+
     private fun rebuildCacheIfNeeded() {
         if (!cacheDirty) return
         if (canvasWidthCu <= 0 || canvasHeightCu <= 0) return
@@ -142,26 +162,16 @@ class LayerRenderer {
         val alpha = if (tool == "marker") MARKER_ALPHA else 255
         strokePaint.color = color
         strokePaint.alpha = alpha
-        val widthScale = if (tool == "marker") MARKER_WIDTH_SCALE else 1f
 
         if (count == 1) {
-            val p = points[2]
-            strokePaint.strokeWidth = widthCu * widthScale * (0.3f + 0.7f * p)
+            strokePaint.strokeWidth = modulatedWidthCu(widthCu, tool, points[2])
             c.drawPoint(points[0], points[1], strokePaint)
             return
         }
 
         var i = 0
         while (i < count - 1) {
-            val ax = points[i * stride]
-            val ay = points[i * stride + 1]
-            val ap = points[i * stride + 2]
-            val bx = points[(i + 1) * stride]
-            val by = points[(i + 1) * stride + 1]
-            val bp = points[(i + 1) * stride + 2]
-            val p = (ap + bp) * 0.5f
-            strokePaint.strokeWidth = widthCu * widthScale * (0.3f + 0.7f * p)
-            c.drawLine(ax, ay, bx, by, strokePaint)
+            drawSegment(c, points, i, tool, widthCu, strokePaint)
             i++
         }
     }
@@ -170,5 +180,37 @@ class LayerRenderer {
         const val DEFAULT_WIDTH_CU = 3f
         const val MARKER_ALPHA = 110
         const val MARKER_WIDTH_SCALE = 3f
+
+        /**
+         * The render-time width function (SPEC §9.2(6)): `width_cu * (0.3 + 0.7 * p)`,
+         * scaled for the marker. Stage 31: shared with the front-buffered wet layer so the
+         * wet pen stroke matches the dry one exactly.
+         */
+        fun modulatedWidthCu(widthCu: Float, tool: String, pressure: Float): Float {
+            val widthScale = if (tool == "marker") MARKER_WIDTH_SCALE else 1f
+            return widthCu * widthScale * (0.3f + 0.7f * pressure)
+        }
+
+        /**
+         * Draw segment [index] → [index] + 1 of stride-5 [points] (canvas units) with the
+         * segment's mean pressure. [paint] must already carry the colour/alpha and a
+         * round cap and join. Shared by the dry cache, the live overlay and (Stage 31) the
+         * wet layer.
+         */
+        fun drawSegment(c: Canvas, points: FloatArray, index: Int, tool: String, widthCu: Float, paint: Paint) {
+            val stride = PackedPoints.STRIDE
+            val a = index * stride
+            val b = a + stride
+            val p = (points[a + 2] + points[b + 2]) * 0.5f
+            paint.strokeWidth = modulatedWidthCu(widthCu, tool, p)
+            c.drawLine(points[a], points[a + 1], points[b], points[b + 1], paint)
+        }
+
+        /** A paint configured exactly like the one the dry cache strokes with. */
+        fun newStrokePaint(): Paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
     }
 }

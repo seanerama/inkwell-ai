@@ -151,6 +151,17 @@ android {
             // additionally gated by BRAIN_ENABLED (stage 25, default OFF → 403). Flip to "false"
             // to hide all brain surfaces without a code change.
             buildConfigField("boolean", "BRAIN", "true")
+            // Low-latency ink kill-switch (Stage 31 compile-time gate, THIS stage's feature):
+            // ON makes the Settings screen show an "Ink" section with two RUNTIME switches,
+            // persisted in InkPrefs and both default OFF — "Low-latency pen (experimental)"
+            // (front-buffered wet pen layer + motion prediction + unbuffered input) and
+            // "Smoothing: Standard / Responsive" — which CanvasScreen applies when a canvas
+            // opens. OFF = no Ink section and every canvas uses today's pen path and Standard
+            // smoothing. Documented release-ON exception (same rationale as LIBRARY/FORMALIZE/
+            // …/BRAIN): default ON in debug AND release, because the owner judges the feel on
+            // the release APK and the runtime switches already default OFF. Flip to "false"
+            // to remove the controls (and the feature) without a code change.
+            buildConfigField("boolean", "LOW_LATENCY_INK", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -203,6 +214,11 @@ android {
             // and the save_to_brain card actions without a code change. The server brain routes
             // are additionally gated by BRAIN_ENABLED (stage 25, default OFF → 403 disabled).
             buildConfigField("boolean", "BRAIN", "true")
+            // Stage 31 low-latency ink: ON in release by documented exception (see the debug
+            // block and the stage-31 spec) — the owner A/Bs the feel on the release APK. The
+            // runtime switches in Settings still default OFF / Standard. Flip to "false" to
+            // hide the Ink settings and keep today's pen path without a code change.
+            buildConfigField("boolean", "LOW_LATENCY_INK", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {
@@ -315,6 +331,10 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     implementation(libs.androidx.work.runtime.ktx)
+
+    // Stage 31: front-buffered wet pen layer + motion prediction (low-latency ink).
+    implementation(libs.androidx.graphics.core)
+    implementation(libs.androidx.input.motionprediction)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.serialization.json)
