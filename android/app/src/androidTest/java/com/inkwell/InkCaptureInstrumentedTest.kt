@@ -29,10 +29,11 @@ import org.junit.runner.RunWith
  * Point-count arithmetic (§9.2(2): historical samples are never dropped):
  *   DOWN (1) + MOVE with historySize 2 (2 + 1 current = 3) + UP (1) = 5.
  *
- * Stage 31: the same synthetic stroke with the low-latency pen **on** (unbuffered input,
- * motion prediction recorded and predicted) persists exactly the same points as with it
- * **off** — predicted points never reach storage (contract `ink-storage`). The attached
- * wet-layer variants live in `LowLatencyInkInstrumentedTest`.
+ * Stage 31: the same synthetic stroke with the low-latency pen **on** persists exactly the
+ * same points as with it **off** (contract `ink-storage`). This view is detached (no wet
+ * layer), so the predictor may record the events but never predicts here: the stroke takes
+ * the View path. The proof that the predictor really ran on the wet path and still changed
+ * nothing stored is `LowLatencyInkInstrumentedTest` (stage 33).
  */
 @RunWith(AndroidJUnit4::class)
 class InkCaptureInstrumentedTest {

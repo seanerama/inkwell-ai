@@ -87,7 +87,8 @@ fun CanvasScreen(
     // save_to_brain). Null → the snackbar shows without the action (e.g. flag-OFF path).
     onOpenBrain: (() -> Unit)? = null,
     // Stage 31: the ink switches to apply; null → read InkPrefs when the canvas opens
-    // (defaults — pen path unchanged, Standard smoothing — when LOW_LATENCY_INK is off).
+    // (stage 33: InkSettings.GATE_OFF — pen path unchanged, Standard smoothing — when the
+    // LOW_LATENCY_INK kill switch is off; the runtime defaults are now on / Responsive).
     inkSettings: InkSettings? = null,
 ) {
     val config = LocalConfiguration.current
@@ -97,7 +98,7 @@ fun CanvasScreen(
         inkSettings ?: if (BuildConfig.LOW_LATENCY_INK) {
             InkSettings.from(InkPrefs.from(context))
         } else {
-            InkSettings()
+            InkSettings.GATE_OFF
         }
     }
 

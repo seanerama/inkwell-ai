@@ -55,8 +55,8 @@ data class InkDebugStats(
  * Rendering and the pan/zoom transform are delegated to [LayerRenderer] and
  * [CanvasTransform] so both the cache and the overlay move together.
  *
- * Stage 31 — **low-latency pen** ([lowLatency], default off; set from `InkPrefs` when a
- * canvas opens). When on and a [WetInkLayer] is attached and available, a pen stroke is
+ * Stage 31 — **low-latency pen** ([lowLatency]; set from `InkPrefs` when a canvas opens,
+ * where it defaults on since stage 33). When on and a [WetInkLayer] is attached and available, a pen stroke is
  * drawn on the front-buffered wet layer instead of through `invalidate()`:
  *  - input is unbuffered (`requestUnbufferedDispatch` on the stylus ACTION_DOWN) and every
  *    `historySize` sample is still iterated (§9.2(2));
@@ -85,8 +85,9 @@ class InkView @JvmOverloads constructor(
     var debugEnabled: Boolean = false
 
     /**
-     * Stage 31: the "Low-latency pen (experimental)" switch (default off). Applies to pen
-     * strokes that start after it is set; the wet layer is used only when attached.
+     * Stage 31: the "Low-latency pen" switch. Off on a bare view; `CanvasScreen` sets it
+     * from `InkPrefs` (default on since stage 33). Applies to pen strokes that start after
+     * it is set; the wet layer is used only when attached.
      */
     var lowLatency: Boolean = false
 
@@ -158,6 +159,15 @@ class InkView @JvmOverloads constructor(
     /** Stage 31 (tests): how many strokes started on the wet layer. */
     @get:VisibleForTesting
     var wetStrokesStarted: Int = 0
+        private set
+
+    /**
+     * Stage 33 (tests): predicted samples the last finished (or aborted) stroke's
+     * [LiveStrokeSink] received from the predictor ([LiveStrokeSink.predictedSamplesReceived]).
+     * Greater than zero proves `MotionEventPredictor` produced output on the wet path.
+     */
+    @get:VisibleForTesting
+    var lastStrokePredictedSamples: Int = 0
         private set
 
     // Two-finger gesture state.
@@ -512,6 +522,7 @@ class InkView @JvmOverloads constructor(
         val s = sink
         drawing = false
         sink = null
+        lastStrokePredictedSamples = s?.predictedSamplesReceived ?: 0
         // finish() drops any predicted tail: only real samples are built and stored.
         val built = s?.finish()
         if (wetStroke) {
@@ -531,6 +542,7 @@ class InkView @JvmOverloads constructor(
 
     private fun abortLiveStroke() {
         drawing = false
+        sink?.let { lastStrokePredictedSamples = it.predictedSamplesReceived }
         sink = null
         if (wetStroke) {
             wetStroke = false

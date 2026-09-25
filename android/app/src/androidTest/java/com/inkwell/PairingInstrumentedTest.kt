@@ -1,8 +1,10 @@
 package com.inkwell
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
@@ -19,6 +21,7 @@ import com.inkwell.ui.PairingTags
 import com.inkwell.ui.PairingViewModel
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -74,24 +77,40 @@ class PairingInstrumentedTest {
         composeRule.onNodeWithTag(PairingTags.STATUS).assertIsDisplayed()
     }
 
-    // Stage 31: the Settings "Ink" section — both switches default off / Standard, and a
-    // change is persisted to InkPrefs (applied the next time a canvas opens).
+    // Stage 31/33: the Settings "Ink" section. On a fresh install (no stored ink prefs)
+    // both switches show ON — low-latency pen on, Responsive selected — and showing them
+    // writes nothing. Turning each off is persisted (applied the next time a canvas opens).
     @Test
-    fun ink_section_defaults_off_and_standard_and_persists_changes() {
-        val vm = PairingViewModel(InMemoryTokenStore())
-        val prefs = InkPrefs(InkPrefs.InMemoryStore())
-        composeRule.setContent {
-            PairingScreen(viewModel = vm, pingEnabled = true, inkPrefs = prefs)
+    fun ink_section_fresh_install_shows_both_on_and_persists_turning_them_off() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val file = context.getSharedPreferences(InkPrefs.PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        file.edit().clear().commit() // a fresh install
+        try {
+            val vm = PairingViewModel(InMemoryTokenStore())
+            val prefs = InkPrefs.from(context)
+            composeRule.setContent {
+                PairingScreen(viewModel = vm, pingEnabled = true, inkPrefs = prefs)
+            }
+            composeRule.onNodeWithTag(PairingTags.INK_SECTION).performScrollTo().assertIsDisplayed()
+            composeRule.onNodeWithTag(PairingTags.INK_LOW_LATENCY).assertIsOn()
+            composeRule.onNodeWithTag(PairingTags.inkSmoothing(SmoothingPreset.RESPONSIVE)).assertIsSelected()
+            composeRule.onNodeWithTag(PairingTags.inkSmoothing(SmoothingPreset.STANDARD)).assertIsNotSelected()
+            assertTrue("showing the defaults must not store them", file.all.isEmpty())
+
+            composeRule.onNodeWithTag(PairingTags.INK_LOW_LATENCY).performClick()
+            composeRule.onNodeWithTag(PairingTags.INK_LOW_LATENCY).assertIsOff()
+            composeRule.onNodeWithTag(PairingTags.inkSmoothing(SmoothingPreset.STANDARD)).performClick()
+            composeRule.onNodeWithTag(PairingTags.inkSmoothing(SmoothingPreset.STANDARD)).assertIsSelected()
+            composeRule.waitForIdle()
+
+            // An explicit off / Standard is stored and wins over the on / Responsive defaults.
+            val reread = InkPrefs.from(context)
+            assertFalse(reread.lowLatencyPen)
+            assertEquals(SmoothingPreset.STANDARD, reread.smoothing)
+            assertEquals(false, file.getBoolean(InkPrefs.KEY_LOW_LATENCY_PEN, true))
+            assertEquals(SmoothingPreset.STANDARD.key, file.getString(InkPrefs.KEY_SMOOTHING, null))
+        } finally {
+            file.edit().clear().commit()
         }
-        composeRule.onNodeWithTag(PairingTags.INK_SECTION).performScrollTo().assertIsDisplayed()
-        composeRule.onNodeWithTag(PairingTags.INK_LOW_LATENCY).assertIsOff()
-
-        composeRule.onNodeWithTag(PairingTags.INK_LOW_LATENCY).performClick()
-        composeRule.onNodeWithTag(PairingTags.INK_LOW_LATENCY).assertIsOn()
-        composeRule.onNodeWithTag(PairingTags.inkSmoothing(SmoothingPreset.RESPONSIVE)).performClick()
-        composeRule.waitForIdle()
-
-        assertTrue(prefs.lowLatencyPen)
-        assertEquals(SmoothingPreset.RESPONSIVE, prefs.smoothing)
     }
 }

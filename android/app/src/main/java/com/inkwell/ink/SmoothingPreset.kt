@@ -15,7 +15,7 @@ enum class SmoothingPreset(
     val minCutoff: Double,
     val beta: Double,
 ) {
-    /** Today's tuning (SPEC §9.2(4)): the default. */
+    /** The original tuning (SPEC §9.2(4)); the default until stage 33. */
     STANDARD("standard", OneEuroFilter.DEFAULT_MIN_CUTOFF, OneEuroFilter.DEFAULT_BETA),
 
     /**
@@ -28,13 +28,14 @@ enum class SmoothingPreset(
      * slow-diagonal check stays clean. Pushing further (beta 0.03, or minCutoff 4.0)
      * buys ≤ 3 ms more and adds jitter, so we stop here. [OneEuroFilterTest]-style
      * coverage lives in `SmoothingPresetTest`; the owner confirms the feel on the tablet
-     * (`smoke/android-low-latency-ink.md`).
+     * (`smoke/android-low-latency-ink.md`). The default since stage 33 (the owner's pick
+     * after the stage 31 feel test).
      */
     RESPONSIVE("responsive", 3.0, 0.02),
     ;
 
     companion object {
-        val DEFAULT = STANDARD
+        val DEFAULT = RESPONSIVE
 
         /** Parse a persisted [key]; anything unknown (or null) falls back to [DEFAULT]. */
         fun fromKey(key: String?): SmoothingPreset = entries.firstOrNull { it.key == key } ?: DEFAULT

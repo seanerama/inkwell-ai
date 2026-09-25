@@ -194,7 +194,7 @@ class WetInkLayer @JvmOverloads constructor(
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             canvas.translate(param.tx, param.ty)
             canvas.scale(param.scale, param.scale)
-            paint.color = param.liveColor
+            paint.color = opaquePenColor(param.liveColor)
             drawStroke(canvas, live.points, live.pointCount, param.liveWidthCu, damage, param.inflateCu)
             drawTail(canvas, live, param)
             canvas.restore()
@@ -224,11 +224,11 @@ class WetInkLayer @JvmOverloads constructor(
             canvas.translate(scene.tx, scene.ty)
             canvas.scale(scene.scale, scene.scale)
             for (s in scene.pending) {
-                paint.color = s.color
+                paint.color = opaquePenColor(s.color)
                 drawStroke(canvas, s.points, s.points.size / PackedPoints.STRIDE, s.widthCu, null, 0f)
             }
             scene.live?.let { live ->
-                paint.color = scene.liveColor
+                paint.color = opaquePenColor(scene.liveColor)
                 drawStroke(canvas, live.points, live.pointCount, scene.liveWidthCu, null, 0f)
             }
             canvas.restore()
@@ -284,6 +284,16 @@ class WetInkLayer @JvmOverloads constructor(
         const val MAX_TAIL_POINTS = 16
     }
 }
+
+/**
+ * Stage 33: the pen colour with alpha forced to 255, as [LayerRenderer] paints a dry pen
+ * stroke (`alpha = 255` for every tool but the marker). The wet layer only draws the pen,
+ * so a translucent pen colour can never make the wet copy differ from its dry copy at the
+ * hand-off. Pure, so `WetInkLayerColorTest` covers it on the JVM.
+ */
+internal fun opaquePenColor(color: Int): Int = color or OPAQUE_ALPHA_MASK
+
+private const val OPAQUE_ALPHA_MASK = 0xFF shl 24
 
 /**
  * Stage 31: the canvas host when the low-latency pen is on — [inkView] with the

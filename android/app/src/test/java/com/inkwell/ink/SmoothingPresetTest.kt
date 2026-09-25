@@ -8,18 +8,18 @@ import kotlin.math.sqrt
 
 /**
  * Stage 31: the smoothing presets map to the documented one-euro parameters, STANDARD is
- * exactly today's tuning, and RESPONSIVE really lags less on a slow diagonal while its
+ * exactly the original tuning, RESPONSIVE is the default since stage 33, and RESPONSIVE really lags less on a slow diagonal while its
  * leftover jitter stays far below a stroke width (SPEC §9.2 slow-diagonal check).
  */
 class SmoothingPresetTest {
 
     @Test
-    fun standard_is_todays_tuning_and_the_default() {
+    fun standard_is_the_original_tuning_and_responsive_is_the_default() {
         assertEquals(1.0, SmoothingPreset.STANDARD.minCutoff, 0.0)
         assertEquals(0.007, SmoothingPreset.STANDARD.beta, 0.0)
         assertEquals(OneEuroFilter.DEFAULT_MIN_CUTOFF, SmoothingPreset.STANDARD.minCutoff, 0.0)
         assertEquals(OneEuroFilter.DEFAULT_BETA, SmoothingPreset.STANDARD.beta, 0.0)
-        assertEquals(SmoothingPreset.STANDARD, SmoothingPreset.DEFAULT)
+        assertEquals(SmoothingPreset.RESPONSIVE, SmoothingPreset.DEFAULT)
     }
 
     @Test
@@ -29,10 +29,12 @@ class SmoothingPresetTest {
     }
 
     @Test
-    fun keys_round_trip_and_unknown_falls_back_to_standard() {
+    fun keys_round_trip_and_unknown_falls_back_to_the_default() {
         for (p in SmoothingPreset.entries) assertEquals(p, SmoothingPreset.fromKey(p.key))
-        assertEquals(SmoothingPreset.STANDARD, SmoothingPreset.fromKey(null))
-        assertEquals(SmoothingPreset.STANDARD, SmoothingPreset.fromKey("turbo"))
+        assertEquals(SmoothingPreset.RESPONSIVE, SmoothingPreset.fromKey(null))
+        assertEquals(SmoothingPreset.RESPONSIVE, SmoothingPreset.fromKey("turbo"))
+        // An explicit stored "standard" is never mistaken for "unset".
+        assertEquals(SmoothingPreset.STANDARD, SmoothingPreset.fromKey("standard"))
     }
 
     @Test

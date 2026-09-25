@@ -25,6 +25,15 @@ class LiveStrokeSink(minCutoff: Double, beta: Double) {
     var predictedTail: FloatArray = EMPTY
         private set
 
+    /**
+     * Stage 33: how many predicted samples [setPredicted] has received over this stroke.
+     * A test hook, surfaced by `InkView.lastStrokePredictedSamples` so the instrumented test
+     * can prove the predictor really ran on the wet path; it never affects what is built
+     * or stored.
+     */
+    var predictedSamplesReceived: Int = 0
+        private set
+
     val isEmpty: Boolean get() = builder.isEmpty
     val pointCount: Int get() = builder.pointCount
 
@@ -45,6 +54,7 @@ class LiveStrokeSink(minCutoff: Double, beta: Double) {
     fun setPredicted(points: FloatArray) {
         require(points.size % PackedPoints.STRIDE == 0) { "predicted tail must be stride 5" }
         predictedTail = points
+        predictedSamplesReceived += points.size / PackedPoints.STRIDE
     }
 
     fun clearPredicted() {
