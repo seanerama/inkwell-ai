@@ -25,8 +25,11 @@ import com.inkwell.data.dao.StrokeDao
  * (`folder_id`, `deleted_at`) via [MIGRATION_2_3] — no v1/v2 table is altered
  * destructively, so ink survives. Version 4 (Stage 22) is also **additive**: it adds one
  * nullable column `canvases.seen_at` (the unread marker for a pushed canvas) via
- * [MIGRATION_3_4] — no v1/v2/v3 table is altered destructively, so ink survives. The
- * exported schema JSON lives in android/app/schemas/ and is committed.
+ * [MIGRATION_3_4] — no v1/v2/v3 table is altered destructively, so ink survives. Version 5
+ * (Stage 32, ADR-0014) is also **additive**: four NOT NULL DEFAULT 0 page-grid columns on
+ * `canvases` via [MIGRATION_4_5], which then grows the grid of any canvas whose stored
+ * strokes lie off page (0,0) so that ink is visible again (stored points are never
+ * touched). The exported schema JSON lives in android/app/schemas/ and is committed.
  *
  * A destructive fallback is forbidden in release builds (contract): [create] never calls
  * fallbackToDestructiveMigration, so a schema mismatch fails loudly rather than silently
@@ -42,7 +45,7 @@ import com.inkwell.data.dao.StrokeDao
         CardStateEntity::class,
         FolderEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -123,9 +126,71 @@ abstract class InkDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 → v5 (Stage 32, ADR-0014, additive): add the page-grid extent to `canvases`
+         * (`page_min_col`, `page_max_col`, `page_min_row`, `page_max_row`, INTEGER NOT NULL
+         * DEFAULT 0) — every existing canvas becomes exactly page (0,0) — then run the
+         * off-page ink repair ([repairPageGrids]) inside the same migration transaction.
+         * No table is altered destructively and no stroke row is written.
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                for (col in PAGE_GRID_COLUMNS) {
+                    db.execSQL("ALTER TABLE `canvases` ADD COLUMN `$col` INTEGER NOT NULL DEFAULT 0")
+                }
+                repairPageGrids(db)
+            }
+        }
+
+        /** The four v5 page-grid columns on `canvases` (contract `ink-storage` ADR-0014). */
+        val PAGE_GRID_COLUMNS = listOf("page_min_col", "page_max_col", "page_min_row", "page_max_row")
+
+        /**
+         * The v5 repair (contract `ink-storage`: "the v5 migration grows the grid of any
+         * canvas whose existing strokes lie off page (0,0) so that it covers their bboxes,
+         * capped; it never moves or edits stored points"). Since v0.0.20, ink written off
+         * the page was stored but never shown; this makes it visible again.
+         *
+         * For each canvas, the union of its strokes' `bbox_*` columns (every layer) is read
+         * with one aggregate query; [PageExtent.covering] turns it into the smallest
+         * whole-page grid containing page (0,0) and the ink, clamped to 8 pages per axis.
+         * Only canvases whose grid differs from (0,0,0,0) are updated. `strokes` is only
+         * read. Returns the number of canvases whose grid was grown (for tests / logs).
+         */
+        fun repairPageGrids(db: SupportSQLiteDatabase): Int {
+            val grown = ArrayList<Pair<String, PageExtent>>()
+            db.query(
+                "SELECT c.id, c.width_cu, c.height_cu, MIN(s.bbox_x), MIN(s.bbox_y), " +
+                    "MAX(s.bbox_x + s.bbox_w), MAX(s.bbox_y + s.bbox_h) " +
+                    "FROM canvases c JOIN layers l ON l.canvas_id = c.id " +
+                    "JOIN strokes s ON s.layer_id = l.id GROUP BY c.id",
+            ).use { c ->
+                while (c.moveToNext()) {
+                    if ((3..6).any { c.isNull(it) }) continue
+                    val extent = PageExtent.covering(
+                        minX = c.getDouble(3),
+                        minY = c.getDouble(4),
+                        maxX = c.getDouble(5),
+                        maxY = c.getDouble(6),
+                        pageW = c.getInt(1),
+                        pageH = c.getInt(2),
+                    )
+                    if (extent != PageExtent.SINGLE) grown.add(c.getString(0) to extent)
+                }
+            }
+            for ((id, e) in grown) {
+                db.execSQL(
+                    "UPDATE `canvases` SET `page_min_col` = ?, `page_max_col` = ?, " +
+                        "`page_min_row` = ?, `page_max_row` = ? WHERE `id` = ?",
+                    arrayOf<Any?>(e.minCol, e.maxCol, e.minRow, e.maxRow, id),
+                )
+            }
+            return grown.size
+        }
+
         fun create(context: Context): InkDatabase =
             Room.databaseBuilder(context, InkDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 // No fallbackToDestructiveMigration (contract ink-storage).
                 .build()
     }

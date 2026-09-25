@@ -82,6 +82,11 @@ class LibraryRepository(
             origin = "user",
             folderId = folderId,
             deletedAt = null,
+            // Stage 32 (ADR-0014): a new canvas is the single page (0,0).
+            pageMinCol = 0,
+            pageMaxCol = 0,
+            pageMinRow = 0,
+            pageMaxRow = 0,
         )
         canvasDao.upsert(canvas)
         layerDao.upsert(
