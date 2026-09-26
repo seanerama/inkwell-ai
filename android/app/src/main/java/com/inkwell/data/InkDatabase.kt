@@ -35,6 +35,12 @@ import com.inkwell.data.dao.StrokeDao
  * fallbackToDestructiveMigration, so a schema mismatch fails loudly rather than silently
  * wiping the user's ink. Later schema changes ship explicit Migrations.
  */
+/**
+ * The current Room schema version (stage 32: v5, the page grid). The single source for
+ * `@Database(version = …)` and for tests that assert the version a fresh database opens at.
+ */
+const val INK_DB_VERSION = 5
+
 @Database(
     entities = [
         SpaceEntity::class,
@@ -45,7 +51,7 @@ import com.inkwell.data.dao.StrokeDao
         CardStateEntity::class,
         FolderEntity::class,
     ],
-    version = 5,
+    version = INK_DB_VERSION,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
