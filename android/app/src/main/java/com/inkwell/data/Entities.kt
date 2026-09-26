@@ -53,6 +53,14 @@ data class CanvasEntity(
     // existing canvas keeps `seen_at` NULL, which for a user-origin canvas is never read
     // (badges only count agent-origin unseen canvases). No v1/v2/v3 table is altered.
     @ColumnInfo(name = "seen_at") val seenAt: Long? = null,
+    // Stage 32 (contract `ink-storage` ADR-0014 additions, Room v5, additive): the page
+    // grid. width_cu/height_cu are the PAGE size; these give the grid extent in whole pages
+    // (min ≤ 0 ≤ max, ≤ 8 per axis). NOT NULL DEFAULT 0 so MIGRATION_4_5's `ADD COLUMN …
+    // DEFAULT 0` matches the entity; every pre-v5 canvas is exactly page (0,0).
+    @ColumnInfo(name = "page_min_col", defaultValue = "0") val pageMinCol: Int = 0,
+    @ColumnInfo(name = "page_max_col", defaultValue = "0") val pageMaxCol: Int = 0,
+    @ColumnInfo(name = "page_min_row", defaultValue = "0") val pageMinRow: Int = 0,
+    @ColumnInfo(name = "page_max_row", defaultValue = "0") val pageMaxRow: Int = 0,
 )
 
 /**

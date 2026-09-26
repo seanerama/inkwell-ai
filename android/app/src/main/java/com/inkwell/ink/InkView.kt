@@ -70,6 +70,11 @@ data class InkDebugStats(
  *    copy released (wet→dry hand-off, no gap and no flicker);
  *  - pan/zoom or a lost surface drops wet content and this view draws those strokes
  *    itself until they are dry. Marker and eraser always use the existing path.
+ *
+ * Stage 32 (ADR-0014): committed ink renders from [LayerRenderer]'s tiled LOD cache, and
+ * the page grid ([setPageExtent]) is painted beneath everything by [PageGridPainter]. The
+ * wet→dry hand-off now waits until the frame has drawn, up to date, every visible tile the
+ * stroke's ink reaches ([LayerRenderer.wasDrawnInLastFrame]).
  */
 class InkView @JvmOverloads constructor(
     context: Context,
@@ -103,6 +108,9 @@ class InkView @JvmOverloads constructor(
     var onAnchorTap: ((Float, Float) -> Unit)? = null
 
     private val renderer = LayerRenderer()
+    // Stage 32: the page grid (paper, edges, surround) beneath raster and ink.
+    private val pagePainter = com.inkwell.render.PageGridPainter()
+    private var pageExtent = com.inkwell.data.PageExtent.SINGLE
     // Stage 22: a pushed raster (PDF page / image) rendered BENEATH ink; cached, blitted
     // through the same [transform] as ink so it tracks pan/zoom without re-rasterising.
     private val rasterRenderer = com.inkwell.render.RasterRenderer()
@@ -190,10 +198,31 @@ class InkView @JvmOverloads constructor(
     }
     private val debugBgPaint = Paint().apply { color = Color.argb(160, 255, 255, 255) }
 
+    init {
+        // Stage 32: record the heap class next to the tile budget (debug builds only), so
+        // the budget can be checked against the device (expandable-canvas assessment).
+        if (com.inkwell.BuildConfig.DEBUG) logMemoryClassOnce(context)
+    }
+
+    /** The **page** size in canvas units (stage 32: a canvas is a grid of equal pages). */
     fun setCanvasSize(widthCu: Int, heightCu: Int) {
         canvasWidthCu = widthCu
         canvasHeightCu = heightCu
         renderer.setCanvasSize(widthCu, heightCu)
+        invalidate()
+    }
+
+    /** Stage 32 (ADR-0014 §1): the canvas's page grid; only its pages are drawn. */
+    fun setPageExtent(extent: com.inkwell.data.PageExtent) {
+        if (extent == pageExtent) return
+        pageExtent = extent
+        renderer.setPageExtent(extent)
+        invalidate()
+    }
+
+    /** Stage 32: page-grid colours from the theme (ARGB): paper, surround, edge, shadow. */
+    fun setPageColors(paper: Int, surround: Int, edge: Int, shadow: Int) {
+        pagePainter.setColors(paper, surround, edge, shadow)
         invalidate()
     }
 
@@ -293,6 +322,8 @@ class InkView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // Stage 32: the page grid (surround, paper, edges) beneath everything.
+        pagePainter.draw(canvas, transform, canvasWidthCu, canvasHeightCu, pageExtent)
         // Stage 22: the pushed raster renders FIRST, beneath ink (SPEC §4.3 / §5.2).
         if (documentVisible && rasterRenderer.hasRaster()) {
             rasterRenderer.draw(canvas, transform)
@@ -706,22 +737,32 @@ class InkView @JvmOverloads constructor(
 
     /**
      * Draw not-yet-dry strokes whose wet copy was dropped, and start the wet→dry hand-off
-     * for strokes whose dry copy this frame has just drawn from the cache.
+     * for strokes whose dry copy this frame has just drawn.
+     *
+     * Stage 32: "drawn" means the renderer's last frame drew, up to date, every visible
+     * tile the stroke's ink reaches ([LayerRenderer.wasDrawnInLastFrame]) — not merely that
+     * the stroke is in the committed set. Until then the wet (or view-drawn) copy stays.
      */
     private fun drawPendingDry(canvas: Canvas) {
         if (pendingDry.isEmpty()) return
         val handOff = ArrayList<PendingDry>()
         val done = ArrayList<PendingDry>()
+        var waitingOnTiles = false
         for (p in pendingDry) {
+            val dryDrawn = p.dryArrived &&
+                renderer.wasDrawnInLastFrame(p.stroke.points, "pen", p.wet.widthCu)
+            if (p.dryArrived && !dryDrawn) waitingOnTiles = true
             when {
-                p.dryArrived && p.viewFallback -> done.add(p) // the cache drew it this frame
-                p.dryArrived && !p.releaseScheduled -> handOff.add(p)
+                dryDrawn && p.viewFallback -> done.add(p) // the tiles drew it this frame
+                dryDrawn && !p.releaseScheduled -> handOff.add(p)
                 p.viewFallback -> renderer.drawOverlayStroke(
                     canvas, transform, p.stroke.points, "pen", p.wet.color, p.wet.widthCu,
                 )
             }
         }
         pendingDry.removeAll(done.toSet())
+        // A dry tile not drawn yet (e.g. it could not be allocated this frame): try again.
+        if (waitingOnTiles) postInvalidateOnAnimation()
         if (handOff.isEmpty()) return
         for (p in handOff) p.releaseScheduled = true
         // Release the wet copy only after the frame that draws the dry copy has been
@@ -889,6 +930,20 @@ class InkView @JvmOverloads constructor(
 
     companion object {
         const val ERASER_RADIUS_CU = 12f
+
+        @Volatile
+        private var memoryClassLogged = false
+
+        private fun logMemoryClassOnce(context: Context) {
+            if (memoryClassLogged) return
+            memoryClassLogged = true
+            val am = context.getSystemService(android.app.ActivityManager::class.java) ?: return
+            android.util.Log.d(
+                "InkView",
+                "memoryClass=${am.memoryClass} MB largeMemoryClass=${am.largeMemoryClass} MB " +
+                    "tileBudget=${LayerRenderer.DEFAULT_BUDGET_BYTES / (1024 * 1024)} MB",
+            )
+        }
 
         /** Max travel (view px) for an ACTION_UP to still count as a tap (Stage 10). */
         const val TAP_SLOP_PX = 24.0

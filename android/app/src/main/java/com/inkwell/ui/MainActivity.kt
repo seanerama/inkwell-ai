@@ -340,6 +340,7 @@ class MainActivity : ComponentActivity() {
     private fun renderThumbnailAsync(canvasId: String) {
         val width = canvasViewModel.canvasWidth
         val height = canvasViewModel.canvasHeight
+        val extent = canvasViewModel.pageExtent
         val strokes = canvasViewModel.strokes.toList()
         lifecycleScope.launch(Dispatchers.Default) {
             runCatching {
@@ -349,6 +350,7 @@ class MainActivity : ComponentActivity() {
                     widthCu = width,
                     heightCu = height,
                     strokes = strokes,
+                    extent = extent,
                 )
             }
         }

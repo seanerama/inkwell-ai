@@ -27,6 +27,8 @@ data class CanvasState(
     // Stage 14: the accent colour of the canvas's space (#RRGGBB), for agent marks (SPEC §6.3).
     // Null when the space row is missing → the renderer falls back to DEFAULT_ACCENT.
     val spaceColor: String? = null,
+    // Stage 32 (ADR-0014): the canvas's page grid; widthCu/heightCu are the PAGE size.
+    val pageExtent: PageExtent = PageExtent.SINGLE,
 )
 
 /**
@@ -89,6 +91,7 @@ class CanvasRepository(
             folderId = canvas.folderId,
             origin = canvas.origin,
             spaceColor = spaceDao.byId(space.id)?.color,
+            pageExtent = canvas.pageExtent,
         )
     }
 
@@ -112,6 +115,7 @@ class CanvasRepository(
             folderId = canvas.folderId,
             origin = canvas.origin,
             spaceColor = spaceDao.byId(canvas.spaceId)?.color,
+            pageExtent = canvas.pageExtent,
         )
     }
 
@@ -143,6 +147,11 @@ class CanvasRepository(
                 updatedAt = now,
                 origin = "agent",
                 folderId = folderId,
+                // Stage 32: a formalized canvas is created as one page (ADR-0014 §6).
+                pageMinCol = 0,
+                pageMaxCol = 0,
+                pageMinRow = 0,
+                pageMaxRow = 0,
             ),
         )
         // Idempotent: reuse an existing agent layer for this job rather than duplicating.
@@ -166,6 +175,16 @@ class CanvasRepository(
     /** Rename a canvas (Stage 11 title edit); bumps `updated_at` via the injected clock. */
     suspend fun renameCanvas(canvasId: String, title: String) {
         canvasDao.rename(canvasId, title, clock())
+    }
+
+    /**
+     * Stage 32 (ADR-0014): persist a canvas's page grid via [CanvasDao.updatePageExtent].
+     * Rejects an extent that breaks the contract invariants (page (0,0) inside, ≤ 8 pages
+     * per axis). Used by growth (stage 34); nothing calls it on a single-page canvas.
+     */
+    suspend fun updatePageExtent(canvasId: String, extent: PageExtent) {
+        require(extent.isValid) { "invalid page extent $extent" }
+        canvasDao.updatePageExtent(canvasId, extent.minCol, extent.maxCol, extent.minRow, extent.maxRow)
     }
 
     suspend fun loadStrokes(layerId: String): List<StrokeEntity> = strokeDao.forLayer(layerId)
@@ -233,6 +252,11 @@ class CanvasRepository(
             createdAt = now,
             updatedAt = now,
             origin = "user",
+            // Stage 32: the default canvas starts as the single page (0,0).
+            pageMinCol = 0,
+            pageMaxCol = 0,
+            pageMinRow = 0,
+            pageMaxRow = 0,
         )
         canvasDao.upsert(canvas)
         return canvas

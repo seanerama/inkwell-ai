@@ -169,6 +169,11 @@ class PushInbox(
                     folderId = folderId,
                     deletedAt = null,
                     seenAt = null,
+                    // Stage 32 (ADR-0014 §6): a pushed canvas is created as one page.
+                    pageMinCol = 0,
+                    pageMaxCol = 0,
+                    pageMinRow = 0,
+                    pageMaxRow = 0,
                 ),
             )
             // This canvas's raster layers, and each layer's rasters (matched by id).
