@@ -34,8 +34,23 @@ interface SpaceDao {
 
 @Dao
 interface CanvasDao {
+    /**
+     * REPLACE a whole canvas row. Stage 34: app code must NOT use this on a canvas that may
+     * already exist — REPLACE rewrites every column, so it would reset a grown page grid (the
+     * grid never shrinks, contract `ink-storage` ADR-0014). Create rows with [insertIfAbsent]
+     * and change existing ones with the column-scoped UPDATEs below. Kept for test seeding.
+     */
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(canvas: CanvasEntity)
+
+    /**
+     * Stage 34: create a canvas row only if no row has its id (INSERT OR IGNORE); an existing
+     * row — its page grid included — is left untouched. Returns the new rowid, or -1 when the
+     * row already existed. Used by every canvas-creation path (default canvas, Library,
+     * Formalize, push inbox), so a re-delivered job can never shrink a grown grid.
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(canvas: CanvasEntity): Long
 
     @Query("SELECT * FROM canvases WHERE space_id = :spaceId ORDER BY updated_at DESC")
     suspend fun forSpace(spaceId: String): List<CanvasEntity>
@@ -100,6 +115,14 @@ interface CanvasDao {
     @Query("UPDATE canvases SET deleted_at = :deletedAt WHERE id = :id")
     suspend fun setDeletedAt(id: String, deletedAt: Long?)
 
+    /**
+     * Stage 34: stamp `seen_at` the first time a canvas is opened (a no-op once set). A
+     * column-scoped UPDATE, replacing the stage-22 read + REPLACE that could write back a
+     * stale page grid over one grown in between.
+     */
+    @Query("UPDATE canvases SET seen_at = :seenAt WHERE id = :id AND seen_at IS NULL")
+    suspend fun markSeen(id: String, seenAt: Long)
+
     /** Soft-delete every live canvas in a folder (used when a folder is trashed). */
     @Query(
         "UPDATE canvases SET deleted_at = :deletedAt WHERE space_id = :spaceId AND " +
@@ -117,12 +140,16 @@ interface CanvasDao {
     /**
      * Stage 32 (ADR-0014, Room v5): record a canvas's page-grid extent. The grid only
      * grows (contract `ink-storage`: growth is recorded, never inferred); callers pass a
-     * [com.inkwell.data.PageExtent] that is valid (page (0,0) inside, ≤ 8 per axis).
+     * [com.inkwell.data.PageExtent] that is valid (page (0,0) inside, ≤ 8 per axis) and
+     * contains the stored grid. Stage 34: the write itself is monotonic — each bound only
+     * moves outward (MIN / MAX with the stored value) — so no caller can shrink a grid.
      * `updated_at` is left alone: this writes the grid, not the ink.
      */
     @Query(
-        "UPDATE canvases SET page_min_col = :minCol, page_max_col = :maxCol, " +
-            "page_min_row = :minRow, page_max_row = :maxRow WHERE id = :id",
+        "UPDATE canvases SET page_min_col = MIN(page_min_col, :minCol), " +
+            "page_max_col = MAX(page_max_col, :maxCol), " +
+            "page_min_row = MIN(page_min_row, :minRow), " +
+            "page_max_row = MAX(page_max_row, :maxRow) WHERE id = :id",
     )
     suspend fun updatePageExtent(id: String, minCol: Int, maxCol: Int, minRow: Int, maxRow: Int)
 }

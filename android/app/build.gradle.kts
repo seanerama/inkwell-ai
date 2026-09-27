@@ -162,6 +162,13 @@ android {
             // the release APK (stage 33 made the runtime switches default on). Flip to "false"
             // to remove the controls (and the feature) without a code change.
             buildConfigField("boolean", "LOW_LATENCY_INK", "true")
+            // Expandable-canvas kill-switch (Stage 34 dark-launch flag, THIS stage's feature,
+            // ADR-0014 §2): ON draws the one-page ghost ring around the page grid, lets a pen
+            // or marker stroke start in the grid or the ring, and grows the grid by whole pages
+            // in any direction on pen-up (8-page cap per axis). OFF = the fixed page with
+            // visible edges (stage 32): no ring, no growth, strokes start only on the grid and
+            // the live stroke is clipped at its edge. ON in debug so it can be tested.
+            buildConfigField("boolean", "EXPANDABLE_CANVAS", "true")
         }
         getByName("release") {
             // Stage 6 has landed: Send replaces the walking-skeleton Ping round-trip,
@@ -219,6 +226,10 @@ android {
             // runtime switches in Settings default on / Responsive (stage 33). Flip to "false" to
             // hide the Ink settings and keep today's pen path without a code change.
             buildConfigField("boolean", "LOW_LATENCY_INK", "true")
+            // Stage 34 expandable canvas: OFF in release (NOT a release-ON exception). Growing a
+            // canvas while Ask still exports only page (0,0) would silently hide the new pages
+            // from the agent; stage 35 (region export) flips this ON.
+            buildConfigField("boolean", "EXPANDABLE_CANVAS", "false")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

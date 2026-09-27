@@ -16,6 +16,10 @@ import org.junit.Test
  * using the SERVER's id, `origin="agent"`, in the SAME folder as the source, with exactly
  * ONE `agent`/`annotation` layer and NO user/ink layer (SPEC §4.3). Idempotent by (canvas,
  * job): re-applying the same finished job never duplicates the row or the layer.
+ *
+ * Stage 34: a re-delivered formalize job never shrinks a grown page grid (the row is
+ * insert-or-ignore, not REPLACE), and [CanvasRepository.insertStrokeWithGrowth] writes the
+ * stroke and the grown grid inside one transaction.
  */
 class CanvasRepositoryFormalizeTest {
 
@@ -27,7 +31,7 @@ class CanvasRepositoryFormalizeTest {
         override suspend fun delete(id: String) { store.removeAll { it.id == id } }
     }
 
-    private class FakeCanvasDao : CanvasDao {
+    private class FakeCanvasDao(private val log: MutableList<String>? = null) : CanvasDao {
         val store = mutableListOf<CanvasEntity>()
         override suspend fun upsert(canvas: CanvasEntity) { store.removeAll { it.id == canvas.id }; store.add(canvas) }
         override suspend fun forSpace(spaceId: String) = store.filter { it.spaceId == spaceId }
@@ -50,8 +54,27 @@ class CanvasRepositoryFormalizeTest {
         override suspend fun trashCanvasesInFolder(spaceId: String, folderId: String, deletedAt: Long) {}
         override suspend fun purgeTrashedBefore(cutoff: Long) {}
         override suspend fun hardDelete(id: String) { store.removeAll { it.id == id } }
+        // Mirrors the monotonic SQL (MIN / MAX with the stored bounds, stage 34).
         override suspend fun updatePageExtent(id: String, minCol: Int, maxCol: Int, minRow: Int, maxRow: Int) {
-            store.replaceAll { if (it.id == id) it.copy(pageMinCol = minCol, pageMaxCol = maxCol, pageMinRow = minRow, pageMaxRow = maxRow) else it }
+            log?.add("grid")
+            store.replaceAll {
+                if (it.id == id) {
+                    it.copy(
+                        pageMinCol = minOf(it.pageMinCol, minCol), pageMaxCol = maxOf(it.pageMaxCol, maxCol),
+                        pageMinRow = minOf(it.pageMinRow, minRow), pageMaxRow = maxOf(it.pageMaxRow, maxRow),
+                    )
+                } else {
+                    it
+                }
+            }
+        }
+        // Stage 34: INSERT OR IGNORE and the column-scoped seen_at stamp (CanvasDao).
+        override suspend fun insertIfAbsent(canvas: CanvasEntity): Long {
+            if (store.any { it.id == canvas.id }) return -1L
+            store.add(canvas); return 1L
+        }
+        override suspend fun markSeen(id: String, seenAt: Long) {
+            store.replaceAll { if (it.id == id && it.seenAt == null) it.copy(seenAt = seenAt) else it }
         }
     }
 
@@ -66,23 +89,30 @@ class CanvasRepositoryFormalizeTest {
         override suspend fun forCanvas(canvasId: String) = store.filter { it.canvasId == canvasId }.sortedBy { it.z }
     }
 
-    private class FakeStrokeDao : StrokeDao {
-        override suspend fun insert(stroke: StrokeEntity) {}
-        override suspend fun forLayer(layerId: String) = emptyList<StrokeEntity>()
+    private class FakeStrokeDao(private val log: MutableList<String>? = null) : StrokeDao {
+        val store = mutableListOf<StrokeEntity>()
+        override suspend fun insert(stroke: StrokeEntity) { log?.add("stroke"); store.add(stroke) }
+        override suspend fun forLayer(layerId: String) = store.filter { it.layerId == layerId }
         override suspend fun byId(id: String): StrokeEntity? = null
         override suspend fun deleteById(id: String) {}
         override suspend fun count() = 0
     }
 
-    private fun repo(canvasDao: FakeCanvasDao, layerDao: FakeLayerDao): CanvasRepository {
+    private fun repo(
+        canvasDao: FakeCanvasDao,
+        layerDao: FakeLayerDao,
+        strokeDao: FakeStrokeDao = FakeStrokeDao(),
+        runInTransaction: suspend (suspend () -> Unit) -> Unit = { it() },
+    ): CanvasRepository {
         var n = 0
         return CanvasRepository(
             spaceDao = FakeSpaceDao(),
             canvasDao = canvasDao,
             layerDao = layerDao,
-            strokeDao = FakeStrokeDao(),
+            strokeDao = strokeDao,
             idGen = { "gen-${n++}" },
             clock = { 42L },
+            runInTransaction = runInTransaction,
         )
     }
 
@@ -146,5 +176,72 @@ class CanvasRepositoryFormalizeTest {
             "srv-9", "space-1", "Formalized", 2480, 3508, sourceCanvasId = null, jobId = "job-f",
         )
         assertNull("no source → root folder", canvasDao.byId("srv-9")!!.folderId)
+    }
+
+    // --- Stage 34: the grid never shrinks; growth is atomic with the stroke ---
+
+    @Test
+    fun a_re_delivered_formalize_job_keeps_a_grown_page_grid() = runTest {
+        val canvasDao = FakeCanvasDao().apply { store.add(sourceCanvas()) }
+        val layerDao = FakeLayerDao()
+        val r = repo(canvasDao, layerDao)
+        r.createFormalizedCanvas("srv-9", "space-1", "T — formalized", 1600, 1200, "canvas-1", "job-f")
+        r.updatePageExtent("srv-9", PageExtent(-1, 2, 0, 1))
+
+        // The same finished job arrives again (a re-delivered poll result).
+        r.createFormalizedCanvas("srv-9", "space-1", "T — formalized", 1600, 1200, "canvas-1", "job-f")
+
+        assertEquals(PageExtent(-1, 2, 0, 1), canvasDao.byId("srv-9")!!.pageExtent)
+        assertEquals(1, canvasDao.store.count { it.id == "srv-9" })
+        assertEquals(1, layerDao.forCanvas("srv-9").size)
+    }
+
+    @Test
+    fun a_stroke_and_its_grid_growth_are_written_in_one_transaction() = runTest {
+        val log = mutableListOf<String>()
+        val canvasDao = FakeCanvasDao(log).apply { store.add(sourceCanvas()) } // 800 × 600 pages
+        val strokeDao = FakeStrokeDao(log)
+        val r = repo(
+            canvasDao, FakeLayerDao(), strokeDao,
+            runInTransaction = { block -> log.add("begin"); block(); log.add("end") },
+        )
+        // A stroke from page (0,0) into the ring page to the left.
+        val points = floatArrayOf(100f, 100f, 0.5f, 0f, 0f, -300f, 120f, 0.6f, 0f, 16f)
+        val built = com.inkwell.ink.BuiltStroke(points, 2, -300f, 100f, 400f, 20f)
+
+        val result = r.insertStrokeWithGrowth("canvas-1", "ink-1", StrokeCommitData(built, "pen", "#111111", 3f))
+
+        assertEquals(listOf("begin", "stroke", "grid", "end"), log)
+        assertEquals(PageExtent(-1, 0, 0, 0), result.pageExtent)
+        assertEquals(PageExtent(-1, 0, 0, 0), canvasDao.byId("canvas-1")!!.pageExtent)
+        assertEquals(false, result.capped)
+        val stored = strokeDao.store.single()
+        assertEquals(2, stored.pointCount)
+        assertTrue(PackedPoints.decode(stored.points, 2).contentEquals(points))
+    }
+
+    @Test
+    fun a_stroke_past_the_cap_is_stored_whole_and_reported_capped() = runTest {
+        val canvasDao = FakeCanvasDao().apply {
+            store.add(sourceCanvas().copy(pageMinCol = -7, pageMaxCol = 0))
+        }
+        val strokeDao = FakeStrokeDao()
+        val r = repo(canvasDao, FakeLayerDao(), strokeDao)
+        val points = floatArrayOf(700f, 100f, 0.5f, 0f, 0f, 1000f, 100f, 0.5f, 0f, 16f)
+        val built = com.inkwell.ink.BuiltStroke(points, 2, 700f, 100f, 300f, 0f)
+
+        val result = r.insertStrokeWithGrowth("canvas-1", "ink-1", StrokeCommitData(built, "pen", "#111111", 3f))
+
+        assertTrue(result.capped)
+        assertEquals(PageExtent(-7, 0, 0, 0), canvasDao.byId("canvas-1")!!.pageExtent)
+        assertEquals(2, strokeDao.store.single().pointCount)
+        assertTrue(PackedPoints.decode(strokeDao.store.single().points, 2).contentEquals(points))
+    }
+
+    @Test
+    fun update_page_extent_never_shrinks_the_grid() = runTest {
+        val canvasDao = FakeCanvasDao().apply { store.add(sourceCanvas().copy(pageMinCol = -2, pageMaxRow = 3)) }
+        repo(canvasDao, FakeLayerDao()).updatePageExtent("canvas-1", PageExtent(0, 1, 0, 0))
+        assertEquals(PageExtent(-2, 1, 0, 3), canvasDao.byId("canvas-1")!!.pageExtent)
     }
 }

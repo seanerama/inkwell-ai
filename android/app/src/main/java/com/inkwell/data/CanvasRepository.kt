@@ -58,6 +58,18 @@ interface FormalizedCanvasStore {
 }
 
 /**
+ * Stage 34: the outcome of [CanvasRepository.insertStrokeWithGrowth] — the persisted
+ * stroke, the canvas's page grid after it (null when the canvas row is missing), and
+ * whether the stroke reached past the 8-page cap (its points are all stored; the part
+ * beyond the grid renders clipped at the grid edge).
+ */
+data class StrokeInsertResult(
+    val stroke: StrokeEntity,
+    val pageExtent: PageExtent?,
+    val capped: Boolean,
+)
+
+/**
  * Device-local persistence for ink (contract `ink-storage`, Room v1 from Stage 2).
  *
  * On first launch it creates a default space, a default 2480×3508 canvas, and one
@@ -72,6 +84,12 @@ class CanvasRepository(
     private val strokeDao: StrokeDao,
     private val idGen: () -> String = { UUID.randomUUID().toString() },
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /**
+     * Stage 34: runs a block atomically — the app wires `db.withTransaction { }` so a
+     * stroke and the page-grid growth it causes commit together (or not at all); the
+     * default runs inline for JVM tests with fake DAOs (same pattern as [LibraryRepository]).
+     */
+    private val runInTransaction: suspend (suspend () -> Unit) -> Unit = { it() },
 ) : FormalizedCanvasStore {
 
     /** Ensure the default space/canvas/ink-layer exist, then load the canvas + strokes. */
@@ -136,7 +154,10 @@ class CanvasRepository(
     ): LayerEntity {
         val now = clock()
         val folderId = sourceCanvasId?.let { canvasDao.byId(it)?.folderId }
-        canvasDao.upsert(
+        // Stage 34: INSERT OR IGNORE, not REPLACE. A re-delivered formalize job finds its
+        // canvas already there and leaves the row alone, so a page grid grown (or repaired)
+        // since is never reset to one page — the grid never shrinks (ADR-0014).
+        canvasDao.insertIfAbsent(
             CanvasEntity(
                 id = canvasId,
                 spaceId = spaceId,
@@ -180,11 +201,54 @@ class CanvasRepository(
     /**
      * Stage 32 (ADR-0014): persist a canvas's page grid via [CanvasDao.updatePageExtent].
      * Rejects an extent that breaks the contract invariants (page (0,0) inside, ≤ 8 pages
-     * per axis). Used by growth (stage 34); nothing calls it on a single-page canvas.
+     * per axis). Stage 34: the grid never shrinks — the write only moves bounds outward.
      */
     suspend fun updatePageExtent(canvasId: String, extent: PageExtent) {
         require(extent.isValid) { "invalid page extent $extent" }
         canvasDao.updatePageExtent(canvasId, extent.minCol, extent.maxCol, extent.minRow, extent.maxRow)
+    }
+
+    /**
+     * Stage 34 (ADR-0014 §2): insert a committed stroke and grow its canvas's page grid to
+     * cover it, **in one transaction** ([runInTransaction]). The growth is computed from
+     * the grid stored right now (inside the transaction, so a concurrent write cannot be
+     * lost) with [PageGrowth.grow]: whole pages, any direction, 8 per axis, never smaller.
+     * The stroke's points are stored untouched even when they reach past the cap.
+     */
+    suspend fun insertStrokeWithGrowth(
+        canvasId: String,
+        layerId: String,
+        commit: StrokeCommitData,
+    ): StrokeInsertResult {
+        val entity = toStrokeEntity(
+            id = idGen(),
+            layerId = layerId,
+            built = commit.stroke,
+            tool = commit.tool,
+            colorHex = commit.colorHex,
+            widthCu = commit.widthCu,
+            createdAt = clock(),
+        )
+        var extent: PageExtent? = null
+        var capped = false
+        runInTransaction {
+            strokeDao.insert(entity)
+            val canvas = canvasDao.byId(canvasId)
+            if (canvas != null) {
+                val current = canvas.pageExtent
+                val grown = PageGrowth.grow(
+                    current, commit.stroke.points, commit.stroke.pointCount, canvas.widthCu, canvas.heightCu,
+                )
+                // A grid grown from a valid grid is always valid; never let a bad stored row
+                // lose the stroke (the insert above is in the same transaction).
+                if (grown != current && grown.isValid) updatePageExtent(canvasId, grown)
+                extent = grown
+                capped = !PageGrowth.covers(
+                    grown, entity.bboxX, entity.bboxY, entity.bboxW, entity.bboxH, canvas.widthCu, canvas.heightCu,
+                )
+            }
+        }
+        return StrokeInsertResult(entity, extent, capped)
     }
 
     suspend fun loadStrokes(layerId: String): List<StrokeEntity> = strokeDao.forLayer(layerId)
@@ -258,7 +322,8 @@ class CanvasRepository(
             pageMinRow = 0,
             pageMaxRow = 0,
         )
-        canvasDao.upsert(canvas)
+        // Stage 34: never REPLACE a canvas row (it would reset a grown grid).
+        canvasDao.insertIfAbsent(canvas)
         return canvas
     }
 

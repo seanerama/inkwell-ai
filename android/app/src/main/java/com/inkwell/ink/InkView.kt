@@ -75,6 +75,16 @@ data class InkDebugStats(
  * the page grid ([setPageExtent]) is painted beneath everything by [PageGridPainter]. The
  * wet→dry hand-off now waits until the frame has drawn, up to date, every visible tile the
  * stroke's ink reaches ([LayerRenderer.wasDrawnInLastFrame]).
+ *
+ * Stage 34 (ADR-0014 §2, [expandableCanvas]): a faint **ghost ring** one page deep is drawn
+ * around the grid. A pen or marker stroke starts only when its `ACTION_DOWN` lies on the
+ * grid or the ring ([PageGrowth.canStartAt]; the grid alone with the switch off); otherwise
+ * the gesture is consumed — no stroke, no pan. The eraser works anywhere, unchanged. While
+ * the stroke is drawn, its **live region** grows page by page with its points
+ * ([PageGrowth.extend], 8-page cap) and the live ink — View path and wet layer alike — is
+ * clipped to it, which is exactly the grid it commits into ([PageGrowth.grow]), so what you
+ * see while writing is what stays. On pen-up the grid is set to that region before the
+ * commit callback, so the new pages exist before the dry copy arrives.
  */
 class InkView @JvmOverloads constructor(
     context: Context,
@@ -95,6 +105,19 @@ class InkView @JvmOverloads constructor(
      * it is set; the wet layer is used only when attached.
      */
     var lowLatency: Boolean = false
+
+    /**
+     * Stage 34: the expandable-canvas switch (`BuildConfig.EXPANDABLE_CANVAS`; `CanvasScreen`
+     * sets it from the view model). ON: ghost ring, strokes may start in the ring, the grid
+     * grows on pen-up. OFF: the fixed grid — strokes start only on it and the live stroke is
+     * clipped at its edge.
+     */
+    var expandableCanvas: Boolean = com.inkwell.BuildConfig.EXPANDABLE_CANVAS
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
 
     var onStrokeCommitted: ((StrokeCommit) -> Unit)? = null
     var onEraseStroke: ((String) -> Unit)? = null
@@ -150,6 +173,27 @@ class InkView @JvmOverloads constructor(
     private var sink: LiveStrokeSink? = null
     private var drawing = false
     private var erasing = false
+
+    // Stage 34: the live stroke's region (the grid it will commit into) and how many of its
+    // points have been folded in.
+    private var liveRegion = com.inkwell.data.PageExtent.SINGLE
+    private var liveRegionPoints = 0
+    private var liveClip: com.inkwell.render.RectCu? = null
+        set(value) {
+            field = value
+            liveClipArray = value?.let { floatArrayOf(it.left, it.top, it.right, it.bottom) }
+        }
+    /** [liveClip] as `[l, t, r, b]` for the wet layer (rebuilt only when the clip changes). */
+    private var liveClipArray: FloatArray? = null
+
+    /** Stage 34 (tests): pen/marker `ACTION_DOWN`s refused because they were off the writable pages. */
+    @get:VisibleForTesting
+    var strokeStartsRefused: Int = 0
+        private set
+
+    /** Stage 34 (tests): the page grid this view currently draws. */
+    @get:VisibleForTesting
+    val currentPageExtent: com.inkwell.data.PageExtent get() = pageExtent
 
     // --- Stage 31: low-latency pen state ---
     private var wetLayer: WetInkLayer? = null
@@ -322,8 +366,9 @@ class InkView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        // Stage 32: the page grid (surround, paper, edges) beneath everything.
-        pagePainter.draw(canvas, transform, canvasWidthCu, canvasHeightCu, pageExtent)
+        // Stage 32: the page grid (surround, paper, edges) beneath everything; stage 34 adds
+        // the ghost ring around it when the canvas is expandable.
+        pagePainter.draw(canvas, transform, canvasWidthCu, canvasHeightCu, pageExtent, ring = expandableCanvas)
         // Stage 22: the pushed raster renders FIRST, beneath ink (SPEC §4.3 / §5.2).
         if (documentVisible && rasterRenderer.hasRaster()) {
             rasterRenderer.draw(canvas, transform)
@@ -337,6 +382,7 @@ class InkView @JvmOverloads constructor(
             liveTool = tool,
             liveColor = parseColor(colorHex),
             liveWidthCu = widthCu,
+            liveClip = liveClip,
         )
         drawPendingDry(canvas)
         if (live != null && debugEnabled && lowLatency) sampleViewLatency()
@@ -486,6 +532,21 @@ class InkView @JvmOverloads constructor(
         // Only draw with a stylus, or with a finger when no stylus is around.
         if (toolType == MotionEvent.TOOL_TYPE_FINGER && policy.stylusInRange) return true
 
+        // Stage 34: a pen/marker stroke starts only on the grid or its ghost ring (the grid
+        // alone with the switch off). Otherwise the gesture is consumed: no stroke, no pan.
+        if (!com.inkwell.data.PageGrowth.canStartAt(
+                pageExtent,
+                transform.viewToCanvasX(event.x),
+                transform.viewToCanvasY(event.y),
+                canvasWidthCu,
+                canvasHeightCu,
+                expandableCanvas,
+            )
+        ) {
+            strokeStartsRefused++
+            return true
+        }
+
         // Stage 31: deliver this stylus gesture's samples as they arrive, not batched to
         // vsync. History is still iterated below (§9.2(2)).
         if (lowLatency && tool == "pen" && toolType == MotionEvent.TOOL_TYPE_STYLUS) {
@@ -502,6 +563,9 @@ class InkView @JvmOverloads constructor(
         s.start(event.eventTime)
         sink = s
         drawing = true
+        liveRegion = pageExtent
+        liveRegionPoints = 0
+        liveClip = regionClip(liveRegion)
         // Stage 31: the pen goes to the wet layer when the switch is on and the surface is
         // up; otherwise (marker, surface not ready) this stroke takes the existing path.
         wetStroke = lowLatency && tool == "pen" && wetLayer?.isAvailable == true
@@ -546,7 +610,41 @@ class InkView @JvmOverloads constructor(
         countSample()
         lastRealEventTimeMs = event.eventTime
         lastFilterLatencyUs = (System.nanoTime() - t0) / 1000
+        advanceLiveRegion(b)
         emitDebugStats()
+    }
+
+    /**
+     * Stage 34: fold the stroke's new real (filtered, i.e. to-be-stored) points into its live
+     * region, page by page up to the 8-page cap — the same walk [PageGrowth.grow] does at
+     * commit. With the switch off the region stays the grid.
+     */
+    private fun advanceLiveRegion(b: LiveStrokeSink) {
+        if (!expandableCanvas) return
+        val live = b.liveBuffer()
+        val stride = PackedPoints.STRIDE
+        var region = liveRegion
+        for (i in liveRegionPoints until live.pointCount) {
+            region = com.inkwell.data.PageGrowth.extend(
+                region, live.points[i * stride], live.points[i * stride + 1], canvasWidthCu, canvasHeightCu,
+            )
+        }
+        liveRegionPoints = live.pointCount
+        if (region != liveRegion) {
+            liveRegion = region
+            liveClip = regionClip(region)
+        }
+    }
+
+    /** The canvas-unit rect of a page grid (the clip for live ink that commits into it). */
+    private fun regionClip(region: com.inkwell.data.PageExtent): com.inkwell.render.RectCu? {
+        if (canvasWidthCu <= 0 || canvasHeightCu <= 0) return null
+        return com.inkwell.render.RectCu(
+            region.leftCu(canvasWidthCu).toFloat(),
+            region.topCu(canvasHeightCu).toFloat(),
+            region.rightCu(canvasWidthCu).toFloat(),
+            region.bottomCu(canvasHeightCu).toFloat(),
+        )
     }
 
     private fun commitStroke() {
@@ -556,13 +654,24 @@ class InkView @JvmOverloads constructor(
         lastStrokePredictedSamples = s?.predictedSamplesReceived ?: 0
         // finish() drops any predicted tail: only real samples are built and stored.
         val built = s?.finish()
+        val clip = liveClip
+        val clipArray = liveClipArray
+        liveClip = null
+        // Stage 34: the grid becomes the stroke's region (whole pages, any direction, capped)
+        // before the commit callback, so the new pages exist when the dry copy arrives and
+        // the wet→dry hand-off waits on the right tiles.
+        if (built != null && expandableCanvas && liveRegion != pageExtent &&
+            com.inkwell.data.PageGrowth.contains(liveRegion, pageExtent)
+        ) {
+            setPageExtent(liveRegion)
+        }
         if (wetStroke) {
             wetStroke = false
             // Stage 31: keep the finished stroke on the wet layer (multi-buffered, which
             // also hides the front buffer and its predicted tail) until its dry copy is
             // drawn. Registered before the commit callback so a synchronous dry copy is
             // matched too.
-            if (built != null) addPendingDry(built)
+            if (built != null) addPendingDry(built, clip, clipArray)
             showWetScene()
         }
         if (built != null) {
@@ -573,6 +682,7 @@ class InkView @JvmOverloads constructor(
 
     private fun abortLiveStroke() {
         drawing = false
+        liveClip = null
         sink?.let { lastStrokePredictedSamples = it.predictedSamplesReceived }
         sink = null
         if (wetStroke) {
@@ -589,15 +699,15 @@ class InkView @JvmOverloads constructor(
      * dropped, by this view) until its dry copy is drawn. Matched to the stored copy by
      * its exact points (the Room round-trip is lossless, contract `ink-storage`).
      */
-    private class PendingDry(val stroke: BuiltStroke, val wet: WetStroke) {
+    private class PendingDry(val stroke: BuiltStroke, val wet: WetStroke, val clip: com.inkwell.render.RectCu?) {
         var dryArrived = false
         var releaseScheduled = false
         /** Wet copy dropped (pan/zoom or surface lost): drawn by this view instead. */
         var viewFallback = false
     }
 
-    private fun addPendingDry(built: BuiltStroke) {
-        val p = PendingDry(built, WetStroke(built.points, parseColor(colorHex), widthCu))
+    private fun addPendingDry(built: BuiltStroke, clip: com.inkwell.render.RectCu?, clipArray: FloatArray?) {
+        val p = PendingDry(built, WetStroke(built.points, parseColor(colorHex), widthCu, clipArray), clip)
         pendingDry.add(p)
         // Never leave a wet stroke behind if its dry copy never arrives (e.g. no ink layer
         // to persist into): release it after a timeout, as the old path would have.
@@ -616,6 +726,7 @@ class InkView @JvmOverloads constructor(
         scale = transform.scale,
         tx = transform.tx,
         ty = transform.ty,
+        liveClip = if (live != null) liveClipArray else null,
     )
 
     /** Half the widest pen segment plus a 2-px anti-aliasing margin, in canvas units. */
@@ -643,6 +754,7 @@ class InkView @JvmOverloads constructor(
             tx = transform.tx,
             ty = transform.ty,
             newestEventTimeMs = lastRealEventTimeMs,
+            clip = liveClipArray,
         )
         layer.drawLive(frame, wetScene(live))
         if (debugEnabled) lastLatencyPath = "wet"
@@ -756,7 +868,7 @@ class InkView @JvmOverloads constructor(
                 dryDrawn && p.viewFallback -> done.add(p) // the tiles drew it this frame
                 dryDrawn && !p.releaseScheduled -> handOff.add(p)
                 p.viewFallback -> renderer.drawOverlayStroke(
-                    canvas, transform, p.stroke.points, "pen", p.wet.color, p.wet.widthCu,
+                    canvas, transform, p.stroke.points, "pen", p.wet.color, p.wet.widthCu, p.clip,
                 )
             }
         }

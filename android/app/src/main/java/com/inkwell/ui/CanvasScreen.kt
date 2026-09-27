@@ -125,6 +125,8 @@ fun CanvasScreen(
                         val inkView = host?.inkView ?: InkView(ctx)
                         inkView.apply {
                             lowLatency = ink.lowLatencyPen
+                            // Stage 34: ghost ring + growth follow the view model's switch.
+                            expandableCanvas = viewModel.expandableCanvas
                             minCutoff = ink.smoothing.minCutoff
                             beta = ink.smoothing.beta
                             onStrokeCommitted = { viewModel.onStrokeCommitted(it) }
@@ -196,6 +198,29 @@ fun CanvasScreen(
                             .padding(12.dp)
                             .testTag(CanvasTags.SEND_STATUS),
                     )
+                }
+
+                // Stage 34: one-line, non-blocking canvas notice (the 8-page cap). It does not
+                // intercept touches and clears itself after a few seconds.
+                viewModel.canvasNotice?.let { notice ->
+                    LaunchedEffect(notice) {
+                        kotlinx.coroutines.delay(CANVAS_NOTICE_MS)
+                        viewModel.consumeCanvasNotice()
+                    }
+                    Surface(
+                        tonalElevation = 6.dp,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(12.dp)
+                            .testTag(CanvasTags.CANVAS_NOTICE),
+                    ) {
+                        Text(
+                            text = notice,
+                            maxLines = 1,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
                 }
 
                 // Minimal layer tray overlay.
@@ -805,8 +830,14 @@ private fun ColorSwatch(hex: String, selected: Boolean, tag: String, onClick: ()
 }
 
 /** Stable tags for Compose/instrumented tests. */
+/** Stage 34: how long the canvas notice (8-page cap) stays up. */
+private const val CANVAS_NOTICE_MS = 4_000L
+
 object CanvasTags {
     const val SURFACE = "canvas_surface"
+
+    // Stage 34: the one-line canvas notice ("Canvas is at its 8-page limit this way").
+    const val CANVAS_NOTICE = "canvas_notice"
     const val PEN = "canvas_pen"
     const val MARKER = "canvas_marker"
     const val ERASER = "canvas_eraser"

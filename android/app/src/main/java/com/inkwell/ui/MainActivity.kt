@@ -61,6 +61,8 @@ class MainActivity : ComponentActivity() {
             canvasDao = db.canvasDao(),
             layerDao = db.layerDao(),
             strokeDao = db.strokeDao(),
+            // Stage 34: a stroke and the page-grid growth it causes commit atomically.
+            runInTransaction = { block -> db.withTransaction { block() } },
         )
     }
     private val thumbnailRenderer by lazy { ThumbnailRenderer(applicationContext.filesDir) }

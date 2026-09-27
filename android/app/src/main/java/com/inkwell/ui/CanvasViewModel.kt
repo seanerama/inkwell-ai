@@ -119,6 +119,12 @@ class CanvasViewModel(
      * export code inert.
      */
     private val pushedRasterSource: com.inkwell.render.PushedRasterSource? = null,
+    /**
+     * Stage 34 kill-switch ([BuildConfig.EXPANDABLE_CANVAS]; ON in debug, OFF in release until
+     * stage 35): ON → a committed stroke grows the page grid by whole pages in any direction
+     * (8-page cap), persisted in the same transaction as the stroke; OFF → the fixed page grid.
+     */
+    val expandableCanvas: Boolean = BuildConfig.EXPANDABLE_CANVAS,
 ) : ViewModel() {
 
     var tool by mutableStateOf("pen")
@@ -131,8 +137,20 @@ class CanvasViewModel(
         private set
     var canvasHeight by mutableStateOf(CanvasRepository.DEFAULT_HEIGHT_CU)
         private set
-    /** Stage 32 (ADR-0014): the open canvas's page grid; canvasWidth/Height are the page size. */
+    /**
+     * Stage 32 (ADR-0014): the open canvas's page grid; canvasWidth/Height are the page size.
+     * Stage 34: observable growth events — it changes when a stroke grows the grid (set at
+     * pen-up, confirmed after the transaction) and when a canvas opens; stage 35 intersects it
+     * with the viewport. Within one open canvas it never shrinks (undo and erase keep it).
+     */
     var pageExtent by mutableStateOf(com.inkwell.data.PageExtent.SINGLE)
+        private set
+
+    /**
+     * Stage 34: a one-line, non-blocking canvas notice (e.g. [CAP_NOTICE] when a stroke reached
+     * past the 8-page cap). Null when there is nothing to show; [consumeCanvasNotice] clears it.
+     */
+    var canvasNotice by mutableStateOf<String?>(null)
         private set
     var ready by mutableStateOf(false)
         private set
@@ -400,21 +418,50 @@ class CanvasViewModel(
         if (tool == "eraser") tool = "pen" // choosing a color implies a drawing tool
     }
 
-    /** Persist a stroke committed on pen-up and add it to the render list. */
+    /**
+     * Persist a stroke committed on pen-up and add it to the render list.
+     *
+     * Stage 34 (switch on): the page grid grows to cover the stroke. The grown grid is set
+     * here at once (the same [com.inkwell.data.PageGrowth.grow] the capture view used for the
+     * live clip), so the new pages exist before the stroke's dry copy reaches the renderer; the
+     * repository then persists stroke + grid in one transaction and the stored grid is merged
+     * back in (never smaller). A stroke past the 8-page cap is still stored whole, and
+     * [CAP_NOTICE] is shown.
+     */
     fun onStrokeCommitted(commit: StrokeCommit) {
         val layerId = inkLayerId ?: return
-        viewModelScope.launch {
-            val entity = repository.insertStroke(
-                layerId = layerId,
-                commit = StrokeCommitData(
-                    stroke = commit.stroke,
-                    tool = commit.tool,
-                    colorHex = commit.colorHex,
-                    widthCu = commit.widthCu,
-                ),
-            )
-            strokes.add(StrokeMapper.toRenderStroke(entity))
+        val data = StrokeCommitData(
+            stroke = commit.stroke,
+            tool = commit.tool,
+            colorHex = commit.colorHex,
+            widthCu = commit.widthCu,
+        )
+        val cid = canvasId
+        if (!expandableCanvas || cid == null) {
+            viewModelScope.launch {
+                val entity = repository.insertStroke(layerId = layerId, commit = data)
+                strokes.add(StrokeMapper.toRenderStroke(entity))
+            }
+            return
         }
+        pageExtent = com.inkwell.data.PageGrowth.grow(
+            pageExtent, commit.stroke.points, commit.stroke.pointCount, canvasWidth, canvasHeight,
+        )
+        viewModelScope.launch {
+            val result = repository.insertStrokeWithGrowth(canvasId = cid, layerId = layerId, commit = data)
+            if (canvasId != cid) return@launch // another canvas opened meanwhile
+            result.pageExtent?.let { stored ->
+                val merged = com.inkwell.data.PageGrowth.union(pageExtent, stored)
+                pageExtent = if (merged.isValid) merged else stored
+            }
+            if (result.capped) canvasNotice = CAP_NOTICE
+            strokes.add(StrokeMapper.toRenderStroke(result.stroke))
+        }
+    }
+
+    /** Stage 34: the canvas notice has been shown (or dismissed). */
+    fun consumeCanvasNotice() {
+        canvasNotice = null
     }
 
     /** Eraser removed a stroke by id. */
@@ -910,6 +957,9 @@ class CanvasViewModel(
 
     companion object {
         const val DEFAULT_WIDTH_CU = 3f
+
+        /** Stage 34: shown when a stroke reached past the 8-page cap (ADR-0014 §2). */
+        const val CAP_NOTICE = "Canvas is at its 8-page limit this way"
 
         /** How long a card-tap anchor pulse stays lit on the canvas (SPEC §4.7 ~1.5 s). */
         const val ANCHOR_PULSE_MS = 1_500L
