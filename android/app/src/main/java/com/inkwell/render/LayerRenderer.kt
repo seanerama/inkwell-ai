@@ -197,6 +197,8 @@ class LayerRenderer(
      *
      * @param liveStroke stride-5 points of the in-progress stroke (canvas units) or
      *   null when nothing is being drawn.
+     * @param liveClip stage 34: the canvas-unit rect the live stroke is clipped to — the
+     *   page grid it will commit into — so live ink equals committed ink; null = unclipped.
      */
     fun draw(
         outCanvas: Canvas,
@@ -205,17 +207,12 @@ class LayerRenderer(
         liveTool: String = "pen",
         liveColor: Int = Color.BLACK,
         liveWidthCu: Float = DEFAULT_WIDTH_CU,
+        liveClip: RectCu? = null,
     ) {
         drawCommitted(outCanvas, transform)
 
         if (liveStroke != null && liveStroke.size >= PackedPoints.STRIDE) {
-            matrix.reset()
-            matrix.setScale(transform.scale, transform.scale)
-            matrix.postTranslate(transform.tx, transform.ty)
-            outCanvas.save()
-            outCanvas.concat(matrix)
-            drawStroke(outCanvas, liveStroke, liveTool, liveColor, liveWidthCu)
-            outCanvas.restore()
+            drawOverlayStroke(outCanvas, transform, liveStroke, liveTool, liveColor, liveWidthCu, liveClip)
         }
     }
 
@@ -223,7 +220,7 @@ class LayerRenderer(
      * Stage 31: draw one extra overlay stroke (canvas units) through [transform], exactly
      * as the live stroke is drawn. [com.inkwell.ink.InkView] uses it for finished pen
      * strokes whose wet copy was dropped (pan/zoom, surface lost) until their dry copy
-     * reaches the tiles.
+     * reaches the tiles. Stage 34: [clip] (canvas units) clips it like the committed tiles.
      */
     fun drawOverlayStroke(
         outCanvas: Canvas,
@@ -232,6 +229,7 @@ class LayerRenderer(
         tool: String,
         color: Int,
         widthCu: Float,
+        clip: RectCu? = null,
     ) {
         if (points.size < PackedPoints.STRIDE) return
         matrix.reset()
@@ -239,6 +237,7 @@ class LayerRenderer(
         matrix.postTranslate(transform.tx, transform.ty)
         outCanvas.save()
         outCanvas.concat(matrix)
+        if (clip != null) outCanvas.clipRect(clip.left, clip.top, clip.right, clip.bottom)
         drawStroke(outCanvas, points, tool, color, widthCu)
         outCanvas.restore()
     }

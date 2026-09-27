@@ -88,6 +88,14 @@ class SpaceCreateSelectTest {
         override suspend fun updatePageExtent(id: String, minCol: Int, maxCol: Int, minRow: Int, maxRow: Int) {
             store.replaceAll { if (it.id == id) it.copy(pageMinCol = minCol, pageMaxCol = maxCol, pageMinRow = minRow, pageMaxRow = maxRow) else it }
         }
+        // Stage 34: INSERT OR IGNORE and the column-scoped seen_at stamp (CanvasDao).
+        override suspend fun insertIfAbsent(canvas: CanvasEntity): Long {
+            if (store.any { it.id == canvas.id }) return -1L
+            store.add(canvas); return 1L
+        }
+        override suspend fun markSeen(id: String, seenAt: Long) {
+            store.replaceAll { if (it.id == id && it.seenAt == null) it.copy(seenAt = seenAt) else it }
+        }
     }
 
     private class FakeFolderDao : FolderDao {

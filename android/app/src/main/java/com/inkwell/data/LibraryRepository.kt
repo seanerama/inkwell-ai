@@ -88,7 +88,8 @@ class LibraryRepository(
             pageMinRow = 0,
             pageMaxRow = 0,
         )
-        canvasDao.upsert(canvas)
+        // Stage 34: never REPLACE a canvas row (it would reset a grown page grid).
+        canvasDao.insertIfAbsent(canvas)
         layerDao.upsert(
             LayerEntity(
                 id = idGen(),
@@ -214,13 +215,13 @@ class LibraryRepository(
 
     /**
      * Mark a canvas seen (opened): stamp `seen_at` the first time it is opened so its badge /
-     * "New" dot clears. A no-op for an already-seen or missing canvas. Uses byId + upsert (no
-     * new DAO query); `updated_at` is left alone so opening a canvas does not reorder the grid.
+     * "New" dot clears. A no-op for an already-seen or missing canvas; `updated_at` is left
+     * alone so opening a canvas does not reorder the grid. Stage 34: a column-scoped UPDATE
+     * ([CanvasDao.markSeen]) instead of read + REPLACE, which could write a stale page grid
+     * back over one grown in between (the grid never shrinks, ADR-0014).
      */
     suspend fun markSeen(canvasId: String) {
-        val canvas = canvasDao.byId(canvasId) ?: return
-        if (canvas.seenAt != null) return
-        canvasDao.upsert(canvas.copy(seenAt = clock()))
+        canvasDao.markSeen(canvasId, clock())
     }
 
     /** Rename a canvas (bumps `updated_at`). */

@@ -13,8 +13,8 @@ import java.util.UUID
  * Room). [RoomPushedCanvasStore] implements it against the existing DAOs; there is **no
  * new table** (the v4 migration only adds `canvases.seen_at`).
  *
- * All writes are plain upserts keyed by the SERVER id, so re-materialising the same job
- * is idempotent by construction: [canvasExists] lets [com.inkwell.net.PushInbox] skip a
+ * All writes are keyed by the SERVER id (canvases insert-if-absent, stage 34; layers and
+ * rasters upsert), so re-materialising the same job is idempotent by construction: [canvasExists] lets [com.inkwell.net.PushInbox] skip a
  * canvas (and its layers/rasters) it has already created, which is how dedupe-by-canvas-id
  * avoids a second dedupe table (contract note in the stage spec).
  */
@@ -25,7 +25,11 @@ interface PushedCanvasStore {
     /** Create a folder named [name] at the root of [spaceId]; returns its new id. */
     suspend fun createFolder(spaceId: String, name: String): String
 
-    /** Upsert a pushed (agent-origin) canvas by its server id. */
+    /**
+     * Insert a pushed (agent-origin) canvas by its server id, only if absent. Stage 34: an
+     * existing row (say, one a racing materialisation created and the user has since grown)
+     * is left untouched, so its page grid never shrinks.
+     */
     suspend fun insertCanvas(canvas: CanvasEntity)
 
     /** Upsert a raster layer (`type=raster`, `z=-1`) by its server id. */
@@ -69,7 +73,9 @@ class RoomPushedCanvasStore(
         return id
     }
 
-    override suspend fun insertCanvas(canvas: CanvasEntity) = canvasDao.upsert(canvas)
+    override suspend fun insertCanvas(canvas: CanvasEntity) {
+        canvasDao.insertIfAbsent(canvas)
+    }
 
     override suspend fun insertLayer(layer: LayerEntity) = layerDao.upsert(layer)
 

@@ -17,8 +17,12 @@ import com.inkwell.render.LayerRenderer
 import kotlin.math.max
 import kotlin.math.min
 
-/** Stage 31: a finished pen stroke waiting on the wet layer for its dry copy (canvas units). */
-class WetStroke(val points: FloatArray, val color: Int, val widthCu: Float)
+/**
+ * Stage 31: a finished pen stroke waiting on the wet layer for its dry copy (canvas units).
+ * Stage 34: [clip] is the canvas-unit rect `[l, t, r, b]` of the page grid it committed
+ * into, so the wet copy is clipped exactly like its dry copy (null = unclipped).
+ */
+class WetStroke(val points: FloatArray, val color: Int, val widthCu: Float, val clip: FloatArray? = null)
 
 /**
  * Stage 31: one front-buffer frame of the in-progress pen stroke, snapshotted on the UI
@@ -28,6 +32,8 @@ class WetStroke(val points: FloatArray, val color: Int, val widthCu: Float)
  * @param live the in-progress stroke's real (filtered) points.
  * @param predicted the display-only predicted tail (stride 5, canvas units).
  * @param damage `[l, t, r, b]` canvas-unit rect the front buffer clears and redraws.
+ * @param clip stage 34: `[l, t, r, b]` canvas-unit rect the stroke is clipped to (the page
+ *   grid it will commit into), or null for no clip.
  */
 class WetFrame(
     val live: LivePoints,
@@ -40,12 +46,14 @@ class WetFrame(
     val tx: Float,
     val ty: Float,
     val newestEventTimeMs: Long,
+    val clip: FloatArray? = null,
 )
 
 /**
  * Stage 31: what the wet layer's multi-buffered layer shows: finished strokes still
  * waiting for their dry copy ([pending]) plus, while a wet stroke is in progress, its real
  * points so far ([live]; never the predicted tail). Immutable; replaced wholesale.
+ * Stage 34: [liveClip] clips [live] like [WetFrame.clip].
  */
 class WetScene(
     val pending: List<WetStroke>,
@@ -55,6 +63,7 @@ class WetScene(
     val scale: Float,
     val tx: Float,
     val ty: Float,
+    val liveClip: FloatArray? = null,
 ) {
     companion object {
         val EMPTY = WetScene(emptyList(), null, 0, 0f, 1f, 0f, 0f)
@@ -194,6 +203,9 @@ class WetInkLayer @JvmOverloads constructor(
             canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR)
             canvas.translate(param.tx, param.ty)
             canvas.scale(param.scale, param.scale)
+            // Stage 34: after the damage is cleared, clip the ink (and its predicted tail) to
+            // the page grid the stroke commits into, so live equals committed.
+            param.clip?.let { canvas.clipRect(it[0], it[1], it[2], it[3]) }
             paint.color = opaquePenColor(param.liveColor)
             drawStroke(canvas, live.points, live.pointCount, param.liveWidthCu, damage, param.inflateCu)
             drawTail(canvas, live, param)
@@ -225,10 +237,14 @@ class WetInkLayer @JvmOverloads constructor(
             canvas.scale(scene.scale, scene.scale)
             for (s in scene.pending) {
                 paint.color = opaquePenColor(s.color)
+                canvas.save()
+                s.clip?.let { canvas.clipRect(it[0], it[1], it[2], it[3]) }
                 drawStroke(canvas, s.points, s.points.size / PackedPoints.STRIDE, s.widthCu, null, 0f)
+                canvas.restore()
             }
             scene.live?.let { live ->
                 paint.color = opaquePenColor(scene.liveColor)
+                scene.liveClip?.let { canvas.clipRect(it[0], it[1], it[2], it[3]) }
                 drawStroke(canvas, live.points, live.pointCount, scene.liveWidthCu, null, 0f)
             }
             canvas.restore()
