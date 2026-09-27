@@ -205,6 +205,10 @@ class InkView @JvmOverloads constructor(
     var strokeStartsRefused: Int = 0
         private set
 
+    /** Stage 35 (tests): the current pan/zoom as `[scale, tx, ty]` (view px = cu × scale + t). */
+    @get:VisibleForTesting
+    val currentTransform: FloatArray get() = floatArrayOf(transform.scale, transform.tx, transform.ty)
+
     /** Stage 34 (tests): the page grid this view currently draws. */
     @get:VisibleForTesting
     val currentPageExtent: com.inkwell.data.PageExtent get() = pageExtent

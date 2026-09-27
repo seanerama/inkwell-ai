@@ -37,6 +37,7 @@ import com.inkwell.net.Job
 import com.inkwell.net.JobCreateRequest
 import com.inkwell.net.Space
 import com.inkwell.net.SyncResponse
+import com.inkwell.render.AnnotationGeometry
 import com.inkwell.render.CoordinateMapping
 import com.inkwell.ui.CanvasScreen
 import com.inkwell.ui.CanvasTags
@@ -183,20 +184,45 @@ class RegionExportInstrumentedTest {
         composeRule.waitForIdle()
     }
 
-    /** Page (1,0) with its top-left corner at view (0,0): the viewport shows no other page. */
-    private fun scrollToPage10(): Float {
-        val s = pageFitScale()
-        setTransform(s, -pageW * s, 0f)
-        return s
+    /**
+     * Page (1,0) with its top-left corner at view (0,0): the viewport shows no other page.
+     * Pass the [scale] explicitly when returning to the page: the side panel that opens after
+     * a job shrinks the canvas view, so [pageFitScale] may pick a smaller scale then.
+     */
+    private fun scrollToPage10(scale: Float = pageFitScale()): Float {
+        setTransform(scale, -pageW * scale, 0f)
+        return scale
     }
 
-    private fun renderView(): Bitmap {
-        lateinit var bmp: Bitmap
+    /**
+     * The view pixel at canvas point ([cuX], [cuY]) through the view's CURRENT transform, read
+     * after the UI is idle and drawn fresh. Fails with the CU, view coords, transform and view
+     * size if the point is off the view, so a CI failure is diagnosable.
+     */
+    private fun pixelAtCu(label: String, cuX: Float, cuY: Float): Pair<Int, String> {
+        composeRule.waitForIdle()
+        var pixel = 0
+        var info = ""
         composeRule.runOnUiThread {
-            bmp = Bitmap.createBitmap(inkView.width, inkView.height, Bitmap.Config.ARGB_8888)
+            val (scale, tx, ty) = inkView.currentTransform.let { Triple(it[0], it[1], it[2]) }
+            val vx = (cuX * scale + tx).roundToInt()
+            val vy = (cuY * scale + ty).roundToInt()
+            info = "$label: CU ($cuX, $cuY) → view ($vx, $vy) via scale=$scale tx=$tx ty=$ty; " +
+                "view ${inkView.width}×${inkView.height}; agentRegion=${vm.agentRegion}; grid=${vm.pageExtent}"
+            check(vx in 0 until inkView.width && vy in 0 until inkView.height) { "off the view — $info" }
+            val bmp = Bitmap.createBitmap(inkView.width, inkView.height, Bitmap.Config.ARGB_8888)
             inkView.draw(Canvas(bmp))
+            pixel = bmp.getPixel(vx, vy)
+            bmp.recycle()
         }
-        return bmp
+        return pixel to "$info; pixel #${Integer.toHexString(pixel)}"
+    }
+
+    /** The highlight's canvas-CU bounds through the job's region (never the grid). */
+    private fun highlightBoundsCu(): List<Double> {
+        val region = requireNotNull(vm.agentRegion)
+        val h = vm.agentAnnotations.single()
+        return AnnotationGeometry.boundsCu(h, region.widthCu, region.heightCu, region.originX, region.originY).toList()
     }
 
     /** True for the accent at the agent's 70% over white paper (blue clearly dominant). */
@@ -272,15 +298,16 @@ class RegionExportInstrumentedTest {
         img.recycle()
 
         // The job's region travels with its annotations, and the highlight is drawn on page
-        // (1,0) at origin + nm × size: its centre (3720, 1754) CU.
+        // (1,0) at origin + nm × size: the box spans x 3472..3968, y 1578.6..1929.4 CU. The
+        // probes are canvas points mapped through the view's current transform.
         assertEquals(region, vm.agentRegion)
-        val cx = (3720f * s - pageW * s).roundToInt()
-        val cy = (1754f * s).roundToInt()
-        val outside = ((pageW + 0.30f * pageW) * s - pageW * s).roundToInt() // left of the box, same row
-        var view = renderView()
-        assertTrue("highlight centre on page (1,0)", isAccent(view.getPixel(cx, cy - 3)))
-        assertTrue("left of the box is not highlighted", !isAccent(view.getPixel(outside, cy - 3)))
-        view.recycle()
+        val boundsBefore = highlightBoundsCu()
+        assertEquals(3472.0, boundsBefore[0], 1e-6)
+        assertEquals(1578.6, boundsBefore[1], 1e-6)
+        val (inside1, insideInfo1) = pixelAtCu("inside, before growth", INSIDE_X, PROBE_Y)
+        assertTrue("highlight on page (1,0) — $insideInfo1", isAccent(inside1))
+        val (outside1, outsideInfo1) = pixelAtCu("outside, before growth", OUTSIDE_X, PROBE_Y)
+        assertTrue("left of the box is not highlighted — $outsideInfo1", !isAccent(outside1))
 
         // Grow the canvas left: zoom out so the left ring is on screen and write into it.
         val z = 0.05f
@@ -290,12 +317,16 @@ class RegionExportInstrumentedTest {
         composeRule.waitForIdle()
         assertEquals("the job's region is unchanged", region, vm.agentRegion)
 
-        // Back on page (1,0): the highlight is exactly where it was.
-        scrollToPage10()
-        view = renderView()
-        assertTrue("highlight did not move after growth", isAccent(view.getPixel(cx, cy - 3)))
-        assertTrue(!isAccent(view.getPixel(outside, cy - 3)))
-        view.recycle()
+        // The highlight's canvas position (through the job's region) is unchanged by growth.
+        assertEquals("highlight CU bounds unchanged by growth", boundsBefore, highlightBoundsCu())
+
+        // Back on page (1,0) at the same scale: the highlight is exactly where it was, in
+        // canvas CU (probed through the current transform, after the UI is idle).
+        scrollToPage10(s)
+        val (inside2, insideInfo2) = pixelAtCu("inside, after growth", INSIDE_X, PROBE_Y)
+        assertTrue("highlight did not move after growth — $insideInfo2", isAccent(inside2))
+        val (outside2, outsideInfo2) = pixelAtCu("outside, after growth", OUTSIDE_X, PROBE_Y)
+        assertTrue("left of the box still not highlighted — $outsideInfo2", !isAccent(outside2))
     }
 
     @Test
@@ -393,5 +424,10 @@ class RegionExportInstrumentedTest {
 
         /** The seeded bars' row (CU): above the highlight fixture (y 1579..1929 CU). */
         const val BAR_Y = 800f
+
+        /** Highlight probes (canvas CU): inside the box, and left of it on the same row. */
+        const val INSIDE_X = 3720f
+        const val OUTSIDE_X = 3224f
+        const val PROBE_Y = 1740f
     }
 }

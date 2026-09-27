@@ -542,10 +542,17 @@ class CanvasViewModelSendTest {
 
         // The canvas grows (a stroke up-left of the grid adds a page column and a row) and
         // the view moves on.
+        fun markupCu() = vm.agentAnnotations.map { a ->
+            val r = vm.agentRegion!!
+            com.inkwell.render.AnnotationGeometry.boundsCu(a, r.widthCu, r.heightCu, r.originX, r.originY).toList()
+        }
+        val markupBefore = markupCu()
+        assertEquals(pageW + 0.42 * pageW, markupBefore.single()[0], 1e-9)
         vm.onStrokeCommitted(stroke(-100f to -100f, -50f to -60f))
         assertEquals(PageExtent(-1, 1, -1, 0), vm.pageExtent)
         vm.onViewportChanged(-2480.0, -3508.0, 4960.0, 3508.0)
         assertEquals("the job's region is unchanged", region, vm.agentRegion)
+        assertEquals("the markup's canvas-CU placement is unchanged by growth", markupBefore, markupCu())
         vm.onCardTapped(card)
         assertEquals(before, vm.anchorPulses.single().toList())
     }
