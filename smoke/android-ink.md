@@ -116,6 +116,40 @@ every APK that changes ink capture or rendering.
      longer the launch screen but remains reachable.
    - Operator result: [ ] pairing reachable from settings and returns: __________
 
+## Page grid (stage 32, ADR-0014)
+
+The canvas is now a grid of pages. Nothing grows yet (that is stage 34), but the page
+edges are visible, and ink written off the page before this release is shown again.
+
+10. **Zoom out: page edges are visible.** Pinch out until the whole page is on screen.
+    - *Expected:* the page is white paper with a thin edge and a soft shadow; the area
+      around it is a distinct grey surround. If the device is in dark theme, the surround
+      follows the theme and the page stays white.
+    - *Expected screenshot F:* the zoomed-out page with its edge and surround.
+    - Operator result: [ ] page edges and surround visible: __________
+11. **Off-page ink is visible again.** On a device upgraded from v0.0.20 or earlier, open a
+    canvas where ink was written beyond the page edge (it used to vanish on pen-up).
+    (To prepare one on a fresh install: install the previous release, zoom out, write past
+    the right or bottom edge, then install this build over it.)
+    - *Expected:* the canvas now shows extra pages (right / below, or left / above) and
+      the previously invisible ink sits on them; nothing on page 1 moved.
+    - *Expected screenshot G:* the multi-page canvas zoomed out.
+    - Operator result: [ ] off-page ink shown with its extra pages: __________
+12. **Write, erase and pan feel as before.** On page 1 (and on an extra page, if you have
+    one): write several lines with the pen, one with the marker, erase a stroke, undo,
+    pan and pinch.
+    - *Expected:* no gap or flicker when a pen stroke lifts (the dry copy replaces the
+      wet one seamlessly), erase and undo remove exactly one stroke, pan/zoom is smooth,
+      and ink looks as sharp as before at normal zoom.
+    - Operator result: [ ] writing / erasing / panning unchanged: __________
+13. **Memory check.** With **Developer options → Memory** (or Android Studio's profiler)
+    open a canvas with ink on many pages (the canvas from step 11), zoom out and in and pan
+    around all of it for about a minute.
+    - *Expected:* no stutter, no crash; app memory settles rather than climbing (the ink
+      tile cache is capped at 96 MB). In a debug build, logcat tag `InkView` prints
+      `memoryClass=… tileBudget=96 MB` once — note the values here.
+    - Operator result: [ ] no stutter / crash; memoryClass = ______ MB: __________
+
 ## Pass criteria
 
 - [ ] Feel test 1 — slow line, no segmentation, pressure width (screenshot B).
@@ -125,6 +159,9 @@ every APK that changes ink capture or rendering.
 - [ ] Undo removes only the last stroke.
 - [ ] Pan/zoom transforms committed cache and live overlay together.
 - [ ] Ink survives an app restart (screenshot E).
+- [ ] Page grid: page edges visible when zoomed out (screenshot F); off-page ink from an
+      older release shown on its extra pages (screenshot G); writing, erasing and panning
+      unchanged; no stutter or crash panning a many-page canvas (steps 10–13).
 - [ ] Debug overlay numbers are in the expected ranges (sample rate ≥ 90 Hz, filter
       latency low tens of us, dropped samples 0 for clean stylus / rising under palm).
 

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.inkwell.data.INK_DB_VERSION
 import com.inkwell.data.InkDatabase
 import com.inkwell.ink.InkPrefs
 import com.inkwell.ink.SmoothingPreset
@@ -53,10 +54,10 @@ class PairingInstrumentedTest {
         val db = Room.inMemoryDatabaseBuilder(context, InkDatabase::class.java).build()
         try {
             // v1 (stage 2) -> v2 (stage 10, card state) -> v3 (stage 11, folders +
-            // canvas folder_id/deleted_at) -> v4 (stage 22, canvas seen_at). The upgrade
-            // paths are covered by InkDatabaseMigrationTest; this proves a fresh open lands
-            // on the current schema.
-            assertEquals(4, db.openHelper.readableDatabase.version)
+            // canvas folder_id/deleted_at) -> v4 (stage 22, canvas seen_at) -> v5 (stage 32,
+            // page grid). The upgrade paths are covered by InkDatabaseMigrationTest; this
+            // proves a fresh open lands on the current schema (tracks @Database's version).
+            assertEquals(INK_DB_VERSION, db.openHelper.readableDatabase.version)
             // Exercise a DAO to prove the schema is real and queryable.
             runBlocking { assertEquals(0, db.strokeDao().count()) }
         } finally {

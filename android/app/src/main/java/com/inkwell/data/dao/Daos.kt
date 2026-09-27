@@ -113,6 +113,18 @@ interface CanvasDao {
     /** Hard-delete a canvas row (Trash "Delete forever"). */
     @Query("DELETE FROM canvases WHERE id = :id")
     suspend fun hardDelete(id: String)
+
+    /**
+     * Stage 32 (ADR-0014, Room v5): record a canvas's page-grid extent. The grid only
+     * grows (contract `ink-storage`: growth is recorded, never inferred); callers pass a
+     * [com.inkwell.data.PageExtent] that is valid (page (0,0) inside, ≤ 8 per axis).
+     * `updated_at` is left alone: this writes the grid, not the ink.
+     */
+    @Query(
+        "UPDATE canvases SET page_min_col = :minCol, page_max_col = :maxCol, " +
+            "page_min_row = :minRow, page_max_row = :maxRow WHERE id = :id",
+    )
+    suspend fun updatePageExtent(id: String, minCol: Int, maxCol: Int, minRow: Int, maxRow: Int)
 }
 
 @Dao

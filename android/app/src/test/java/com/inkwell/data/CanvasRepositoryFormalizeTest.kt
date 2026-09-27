@@ -50,6 +50,9 @@ class CanvasRepositoryFormalizeTest {
         override suspend fun trashCanvasesInFolder(spaceId: String, folderId: String, deletedAt: Long) {}
         override suspend fun purgeTrashedBefore(cutoff: Long) {}
         override suspend fun hardDelete(id: String) { store.removeAll { it.id == id } }
+        override suspend fun updatePageExtent(id: String, minCol: Int, maxCol: Int, minRow: Int, maxRow: Int) {
+            store.replaceAll { if (it.id == id) it.copy(pageMinCol = minCol, pageMaxCol = maxCol, pageMinRow = minRow, pageMaxRow = maxRow) else it }
+        }
     }
 
     private class FakeLayerDao : LayerDao {

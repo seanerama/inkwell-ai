@@ -131,6 +131,9 @@ class CanvasViewModel(
         private set
     var canvasHeight by mutableStateOf(CanvasRepository.DEFAULT_HEIGHT_CU)
         private set
+    /** Stage 32 (ADR-0014): the open canvas's page grid; canvasWidth/Height are the page size. */
+    var pageExtent by mutableStateOf(com.inkwell.data.PageExtent.SINGLE)
+        private set
     var ready by mutableStateOf(false)
         private set
 
@@ -324,6 +327,7 @@ class CanvasViewModel(
         accentColor = AnnotationRenderer.accentFrom(state.spaceColor)
         canvasWidth = state.widthCu
         canvasHeight = state.heightCu
+        pageExtent = state.pageExtent
         strokes.clear()
         strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
         // Stage 12: if this is the freshly opened redraw canvas, show its diagram + card.

@@ -56,6 +56,26 @@ unverified and stage 32 should log `ActivityManager.getMemoryClass()`. So:
 
 The builder may tune the budget with a measurement recorded here.
 
+### Stage 32 measured budget
+
+The builder had no device or emulator (instrumented tests run in CI), so the budget is set
+by arithmetic and is checked by `TiledRendererBudgetInstrumentedTest`; the device figure
+comes from the smoke run (`smoke/android-ink.md` step 13, logcat `InkView memoryClass=…`).
+
+- **Budget: 96 MB per ink layer (unchanged).** Tile bitmaps are native memory
+  (API 26+), so they do not count against the Java heap `memoryClass`; the budget bounds
+  native pixels instead.
+- **Single-page canvas:** one LOD-0 page tile, 34.8 MB — exactly the old cache, used at
+  every scale ≥ 0.5, so output is pixel-identical. Zoomed out, the LOD-1 tile adds 8.7 MB.
+- **Multi-page grid:** the finest LODs are split into 620 × 877 px sub-tiles (2.2 MB for
+  A4), so a 2944 × 1840 view at scale 1 over a page corner costs at most 24 small tiles
+  (about 52 MB), not four whole pages (139 MB).
+- **The visible set always fits:** the LOD is coarsened until the visible tiles fit the
+  budget. A 3 × 3 grid, fully visible at scale 0.2, is 9 tiles at LOD 2 (19.6 MB); an
+  8 × 8 grid fully visible on the tablet is 64 pages at LOD 3 (about 35 MB).
+- **Export** keeps its own LOD-0 page raster (34.8 MB, as before), now shared by all ink
+  layers instead of one per layer.
+
 ## Deferred / out of scope
 
 - Persisting agent annotations across a canvas reopen (a pre-existing gap).

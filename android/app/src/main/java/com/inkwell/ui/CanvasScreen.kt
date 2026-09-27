@@ -44,6 +44,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -102,6 +103,12 @@ fun CanvasScreen(
         }
     }
 
+    // Stage 32: page-grid colours from the theme tokens (light and dark schemes alike).
+    val scheme = androidx.compose.material3.MaterialTheme.colorScheme
+    val pageSurround = scheme.surfaceVariant.toArgb()
+    val pageEdge = scheme.outline.copy(alpha = 0.55f).toArgb()
+    val pageShadow = scheme.scrim.copy(alpha = 0.18f).toArgb()
+
     Column(modifier = modifier.fillMaxSize()) {
         if (onBack != null) {
             CanvasTopBar(viewModel = viewModel, onBack = onBack)
@@ -136,6 +143,15 @@ fun CanvasScreen(
                         view.widthCu = viewModel.widthCu
                         view.debugEnabled = debugEnabled
                         view.setCanvasSize(viewModel.canvasWidth, viewModel.canvasHeight)
+                        // Stage 32: the page grid and its theme colours (paper stays white:
+                        // it is the page the export sends; surround/edge/shadow follow the theme).
+                        view.setPageExtent(viewModel.pageExtent)
+                        view.setPageColors(
+                            paper = android.graphics.Color.WHITE,
+                            surround = pageSurround,
+                            edge = pageEdge,
+                            shadow = pageShadow,
+                        )
                         view.setCommittedStrokes(viewModel.strokes.toList())
                         // Agent layer (Stage 6) — rendered through AnnotationRenderer.
                         view.setAccentColor(viewModel.accentColor)

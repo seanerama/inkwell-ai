@@ -110,6 +110,9 @@ class LibraryRepositoryTest {
             store.removeAll { it.deletedAt != null && it.deletedAt!! < cutoff }
         }
         override suspend fun hardDelete(id: String) { store.removeAll { it.id == id } }
+        override suspend fun updatePageExtent(id: String, minCol: Int, maxCol: Int, minRow: Int, maxRow: Int) {
+            store.replaceAll { if (it.id == id) it.copy(pageMinCol = minCol, pageMaxCol = maxCol, pageMinRow = minRow, pageMaxRow = maxRow) else it }
+        }
         private inline fun replace(id: String, f: (CanvasEntity) -> CanvasEntity) {
             val i = store.indexOfFirst { it.id == id }
             if (i >= 0) store[i] = f(store[i])
