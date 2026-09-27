@@ -3,6 +3,7 @@ package com.inkwell.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -158,6 +159,23 @@ class CanvasViewModel(
      * Null until the view has reported (then the whole grid is the region).
      */
     private var viewportCu: DoubleArray? = null
+
+    /**
+     * Stage 36: bumped whenever the canvas view should fit the whole page grid to the screen —
+     * each time a canvas opens (a pushed or formalized one too, and re-opening the same one) and
+     * when the Fit control is tapped. Nothing else bumps it: grid growth, a resize or rotation,
+     * and writing never re-fit. `CanvasScreen` hands a new value to the view once.
+     */
+    var fitRequest by mutableIntStateOf(0)
+        private set
+
+    /**
+     * Stage 36: the view's last reported `[scale, tx, ty]` and the fit request it belongs to, so
+     * a re-created canvas view (the screen left and re-entered without a new open) keeps the
+     * user's view instead of fitting again. In memory only.
+     */
+    private var viewTransform: FloatArray? = null
+    private var viewTransformFitRequest = -1
 
     /**
      * Stage 35 (ADR-0014 §4): why Send / Ask / the job-type picker are disabled right now,
@@ -377,6 +395,10 @@ class CanvasViewModel(
         canvasWidth = state.widthCu
         canvasHeight = state.heightCu
         pageExtent = state.pageExtent
+        // Stage 36: every canvas opens fitted to its page grid, so until the view reports the
+        // fitted viewport the export region is the whole grid (not the last canvas's viewport).
+        viewportCu = null
+        fitRequest++
         refreshSendGate()
         strokes.clear()
         strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
@@ -412,7 +434,13 @@ class CanvasViewModel(
      * any transient send/panel state so the newly opened canvas starts clean.
      */
     fun openCanvas(canvasId: String) {
-        if (this.canvasId == canvasId && ready) return
+        if (this.canvasId == canvasId && ready) {
+            // Stage 36: opening the canvas that is already loaded still opens it fitted.
+            viewportCu = null
+            fitRequest++
+            refreshSendGate()
+            return
+        }
         ready = false
         panel = null
         agentAnnotations = emptyList()
@@ -576,6 +604,27 @@ class CanvasViewModel(
     }
 
     // --- Stage 35: the export region (viewport ∩ page grid) and the legibility floor ---
+
+    /** Stage 36: the Fit control — show the whole page grid again (the view applies it). */
+    fun fitToScreen() {
+        fitRequest++
+    }
+
+    /**
+     * Stage 36: the canvas view reports its transform; [handledFitRequest] is the fit request
+     * the view had taken when it reported, so a stale report never outlives a newer fit.
+     */
+    fun onViewTransformChanged(scale: Float, tx: Float, ty: Float, handledFitRequest: Int) {
+        viewTransform = floatArrayOf(scale, tx, ty)
+        viewTransformFitRequest = handledFitRequest
+    }
+
+    /**
+     * Stage 36: the transform a newly created canvas view should start from — the user's last
+     * view of this canvas, when no fit has been requested since — or null to fit.
+     */
+    fun restorableViewTransform(): FloatArray? =
+        viewTransform?.takeIf { viewTransformFitRequest == fitRequest }?.copyOf()
 
     /**
      * The canvas view reports the canvas-unit rect it shows (on every pan/zoom and resize).

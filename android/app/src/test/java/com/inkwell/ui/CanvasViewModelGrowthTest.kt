@@ -173,4 +173,56 @@ class CanvasViewModelGrowthTest {
         vm.consumeCanvasNotice()
         assertNull(vm.canvasNotice)
     }
+
+    // --- Stage 36: fit on open and on Fit, never on growth ---
+
+    @Test
+    fun a_fit_is_requested_on_open_and_on_fit_but_never_by_growth() {
+        val vm = viewModel(expandable = true)
+        val opened = vm.fitRequest
+        assertTrue("opening the canvas requests a fit", opened > 0)
+
+        // Growth (a stroke into the ring) never re-fits.
+        vm.onStrokeCommitted(commit(100f to 100f, 2600f to 150f))
+        assertEquals(PageExtent(0, 1, 0, 0), vm.pageExtent)
+        assertEquals("growth does not request a fit", opened, vm.fitRequest)
+
+        // A viewport report (pan/zoom, resize, rotation) never re-fits either.
+        vm.onViewportChanged(-100.0, -100.0, 900.0, 900.0)
+        assertEquals(opened, vm.fitRequest)
+
+        // The Fit control does.
+        vm.fitToScreen()
+        assertEquals(opened + 1, vm.fitRequest)
+
+        // Re-opening the canvas already loaded opens it fitted too, with the whole grid as the
+        // region until the view reports its fitted viewport.
+        vm.openCanvas(requireNotNull(vm.currentCanvasId))
+        assertEquals(opened + 2, vm.fitRequest)
+        assertEquals(
+            com.inkwell.render.CoordinateMapping.Region(0, 0, 2 * 2480, 3508),
+            vm.currentExportRegion(),
+        )
+        assertNull(vm.sendBlockedHint)
+    }
+
+    @Test
+    fun a_recreated_view_keeps_the_users_view_until_the_next_fit_request() {
+        val vm = viewModel(expandable = true)
+        assertNull("nothing reported yet: the new view fits", vm.restorableViewTransform())
+
+        vm.onViewTransformChanged(0.5f, 10f, 20f, vm.fitRequest)
+        assertArrayEquals(floatArrayOf(0.5f, 10f, 20f), vm.restorableViewTransform(), 0f)
+
+        // Growth keeps it.
+        vm.onStrokeCommitted(commit(100f to 100f, -900f to 300f))
+        assertArrayEquals(floatArrayOf(0.5f, 10f, 20f), vm.restorableViewTransform(), 0f)
+
+        // A newer fit request wins: the view must fit, not restore.
+        vm.fitToScreen()
+        assertNull(vm.restorableViewTransform())
+        // A report from a view that had not taken that request yet is stale.
+        vm.onViewTransformChanged(1f, 0f, 0f, vm.fitRequest - 1)
+        assertNull(vm.restorableViewTransform())
+    }
 }
