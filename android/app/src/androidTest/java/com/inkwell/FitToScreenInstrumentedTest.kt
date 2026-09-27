@@ -10,6 +10,13 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.room.Room
 import androidx.room.withTransaction
 import androidx.test.core.app.ApplicationProvider
@@ -127,8 +134,16 @@ class FitToScreenInstrumentedTest {
         }
     }
 
-    /** Open the canvas in the real screen and wait until the open-fit has been applied. */
-    private fun open(grid: PageExtent, lowLatency: Boolean = false) {
+    /**
+     * Open the canvas in the real screen and wait until the open-fit has been applied.
+     *
+     * [screenPx] pins the whole canvas screen (top bar, toolbar and canvas) to that size in px,
+     * whatever the emulator's display — the canvas view is then its full width and that height
+     * less the toolbar — so geometry assertions run on the product's target (tablet) size. The
+     * screen is aligned top-end, so the pinned Fit control stays inside the window when the
+     * screen is larger than the display. Null leaves the screen at the emulator's size.
+     */
+    private fun open(grid: PageExtent, lowLatency: Boolean = false, screenPx: Pair<Int, Int>? = TABLET_SCREEN_PX) {
         runBlocking { repo.updatePageExtent(canvasId, grid) }
         composeRule.runOnUiThread {
             vm = CanvasViewModel(
@@ -144,12 +159,28 @@ class FitToScreenInstrumentedTest {
             )
         }
         composeRule.setContent {
-            CanvasScreen(
-                viewModel = vm,
-                onOpenSettings = {},
-                debugEnabled = false,
-                inkSettings = InkSettings(lowLatencyPen = lowLatency),
-            )
+            val screen = @androidx.compose.runtime.Composable {
+                CanvasScreen(
+                    viewModel = vm,
+                    onOpenSettings = {},
+                    debugEnabled = false,
+                    inkSettings = InkSettings(lowLatencyPen = lowLatency),
+                )
+            }
+            if (screenPx == null) {
+                screen()
+            } else {
+                val density = LocalDensity.current
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .wrapContentSize(Alignment.TopEnd, unbounded = true)
+                        .requiredSize(
+                            with(density) { screenPx.first.toDp() },
+                            with(density) { screenPx.second.toDp() },
+                        ),
+                ) { screen() }
+            }
         }
         composeRule.runOnUiThread { vm.openCanvas(canvasId) }
         composeRule.waitUntil(TIMEOUT_MS) { vm.ready }
@@ -157,6 +188,13 @@ class FitToScreenInstrumentedTest {
         composeRule.runOnUiThread {
             inkView = requireNotNull(findInkView(composeRule.activity.window.decorView)) { "no InkView" }
             root = (inkView.parent as? InkSurfaceHost) ?: inkView
+        }
+        if (screenPx != null) {
+            onUi {
+                // Pinned: the canvas view spans the screen's width (±1 px of dp rounding).
+                assertEquals("pinned canvas width", screenPx.first.toFloat(), inkView.width.toFloat(), 1f)
+                assertTrue("pinned canvas height ${inkView.height}", inkView.height in (screenPx.second / 2) until screenPx.second)
+            }
         }
         awaitFitted()
     }
@@ -428,8 +466,28 @@ class FitToScreenInstrumentedTest {
     }
 
     @Test
+    fun on_a_small_view_a_2x1_grid_clamps_at_min_scale_and_is_centred() {
+        // A phone-sized canvas (as the CI emulator's 320 × 552 px): fitting 4960 CU into 320 px
+        // needs scale ≈ 0.058, below minScale — the spec's clamp: minScale, centred.
+        open(PageExtent(0, 1, 0, 0), screenPx = SMALL_SCREEN_PX)
+        val (s, tx, ty) = transform().let { Triple(it[0], it[1], it[2]) }
+        var w = 0
+        var h = 0
+        onUi { w = inkView.width; h = inkView.height }
+        val info = "transform [$s, $tx, $ty] in ${w}×$h"
+        assertEquals("clamped at minScale — $info", 0.1f, s, 0f)
+        assertEquals("grid centre x == view centre x — $info", w / 2f, 2480f * s + tx, 1f)
+        assertEquals("grid centre y == view centre y — $info", h / 2f, 1754f * s + ty, 1f)
+        // The clamp keeps the grid wider than the view: the region is what is on screen.
+        val r = gridInView()
+        assertTrue("wider than the view — $info", r[0] < 0f && r[2] > w)
+    }
+
+    @Test
     fun low_latency_pen_strokes_after_a_fit_commit_at_the_right_canvas_positions() {
-        open(PageExtent.SINGLE, lowLatency = true)
+        // Not pinned: the front-buffered wet surface stays inside the window. It asserts only a
+        // single page fitted whole, which holds on any view ≥ ~300 px wide (scale > minScale).
+        open(PageExtent.SINGLE, lowLatency = true, screenPx = null)
         val host = requireNotNull(root as? InkSurfaceHost) { "the low-latency canvas hosts an InkSurfaceHost" }
         runCatching { composeRule.waitUntil(WET_SURFACE_TIMEOUT_MS) { host.wetLayer.isAvailable } }
         if (!host.wetLayer.isAvailable) {
@@ -508,6 +566,12 @@ class FitToScreenInstrumentedTest {
         const val SETTLE_MS = 400L
         const val SAMPLES = 24
         const val DT_MS = 4L
+
+        /** The product's target: a landscape tablet canvas screen (px), whatever the emulator. */
+        val TABLET_SCREEN_PX = 1280 to 880
+
+        /** A phone-sized canvas screen (px), where a 2 × 1 grid's fit clamps at minScale. */
+        val SMALL_SCREEN_PX = 320 to 640
 
         /** Stored-point tolerance (CU): view px ↔ CU through a float transform is ~1e-3 CU. */
         const val TOL_CU = 0.5f
