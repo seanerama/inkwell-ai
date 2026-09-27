@@ -74,6 +74,10 @@ import com.inkwell.ink.InkView
  * are read once when the canvas opens. With "Low-latency pen" on, the canvas hosts an
  * [InkSurfaceHost] (InkView + the front-buffered wet layer); otherwise a bare [InkView]
  * exactly as before. The smoothing preset sets the one-euro knobs either way.
+ *
+ * Stage 36: every canvas opens fitted to its page grid ([CanvasViewModel.fitRequest] →
+ * [InkView.fitToPageGrid]), and a pinned **Fit** control beside the overflow brings that view
+ * back. A re-created canvas view with no new fit request keeps the user's last view.
  */
 @Composable
 fun CanvasScreen(
@@ -137,6 +141,15 @@ fun CanvasScreen(
                             // Stage 35: every pan/zoom reports what is on screen, so Send
                             // exports that region and the legibility floor is re-checked.
                             onViewportChanged = { l, t, r, b -> viewModel.onViewportChanged(l, t, r, b) }
+                            // Stage 36: remember the view so a re-created view keeps it; start
+                            // from it when no fit was requested since (else the update fits).
+                            onViewTransformChanged = { s, x, y ->
+                                viewModel.onViewTransformChanged(s, x, y, fitRequestHandled)
+                            }
+                            viewModel.restorableViewTransform()?.let { t ->
+                                fitRequestHandled = viewModel.fitRequest
+                                setTransform(t[0], t[1], t[2])
+                            }
                             this.debugEnabled = debugEnabled
                         }
                         host ?: inkView
@@ -151,6 +164,13 @@ fun CanvasScreen(
                         // Stage 32: the page grid and its theme colours (paper stays white:
                         // it is the page the export sends; surround/edge/shadow follow the theme).
                         view.setPageExtent(viewModel.pageExtent)
+                        // Stage 36: fit the page grid on open and on Fit — once per request, after
+                        // the page size and grid above are set. Growth never bumps the request.
+                        val fit = viewModel.fitRequest
+                        if (view.fitRequestHandled != fit) {
+                            view.fitRequestHandled = fit
+                            view.fitToPageGrid()
+                        }
                         view.setPageColors(
                             paper = android.graphics.Color.WHITE,
                             surround = pageSurround,
@@ -810,6 +830,13 @@ private fun Toolbar(
             }
         }
 
+        // Stage 36: Fit — pinned beside the overflow (stage 28: never scrolls, never clips), one
+        // tap to show the whole page grid again.
+        TextButton(
+            onClick = viewModel::fitToScreen,
+            modifier = Modifier.testTag(CanvasTags.FIT),
+        ) { Text("Fit") }
+
         // Trailing overflow: pinned (never scrolls, never clips). Holds Undo + Settings so
         // Settings is always one tap away regardless of the toolbar's width.
         var overflow by remember { mutableStateOf(false) }
@@ -875,6 +902,9 @@ object CanvasTags {
 
     // Stage 28: the trailing overflow (⋮) that holds Undo + Settings so Settings never clips.
     const val OVERFLOW = "canvas_overflow"
+
+    // Stage 36: the pinned Fit control (whole page grid on screen).
+    const val FIT = "canvas_fit"
     const val EXPORT_PREVIEW = "canvas_export_preview"
     const val RENDER_FIXTURE = "canvas_render_fixture"
     const val EXPORT_PREVIEW_INFO = "canvas_export_preview_info"

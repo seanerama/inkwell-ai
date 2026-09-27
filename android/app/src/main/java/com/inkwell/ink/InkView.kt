@@ -85,6 +85,12 @@ data class InkDebugStats(
  * clipped to it, which is exactly the grid it commits into ([PageGrowth.grow]), so what you
  * see while writing is what stays. On pen-up the grid is set to that region before the
  * commit callback, so the new pages exist before the dry copy arrives.
+ *
+ * Stage 36: [fitToPageGrid] shows the whole page grid, centred with a 16 dp margin
+ * ([CanvasTransform.fitting]). The fit is applied at the next draw, when the view has its laid-out
+ * size (never at 0 × 0), and never while a stroke is being written (it waits for pen-up). Only a
+ * request fits: a size change (rotation, resize, the side panel) or grid growth keeps the view,
+ * and an explicit [setTransform] or a pan/zoom gesture cancels a fit that has not applied yet.
  */
 class InkView @JvmOverloads constructor(
     context: Context,
@@ -140,6 +146,28 @@ class InkView @JvmOverloads constructor(
             field = value
             reportViewport()
         }
+
+    /**
+     * Stage 36: the current `scale, tx, ty`, reported with the viewport (never while a fit is
+     * pending), so the view model can give a re-created view the same view back.
+     */
+    var onViewTransformChanged: ((Float, Float, Float) -> Unit)? = null
+
+    /**
+     * Stage 36: the last view-model fit request ([com.inkwell.ui.CanvasViewModel.fitRequest])
+     * this view has taken. `CanvasScreen` calls [fitToPageGrid] when the request moves on.
+     */
+    var fitRequestHandled: Int = NO_FIT_REQUEST
+
+    /** Stage 36: a fit is waiting for the view's size (the next draw) or for pen-up. */
+    private var pendingFit = false
+
+    /** Stage 36 (tests): true while a requested fit has not been applied yet. */
+    @get:VisibleForTesting
+    val fitPending: Boolean get() = pendingFit
+
+    /** Stage 36: the margin around a fitted grid, 16 dp in px. */
+    private val fitMarginPx: Float = CanvasTransform.FIT_MARGIN_DP * resources.displayMetrics.density
 
     private val renderer = LayerRenderer()
     // Stage 32: the page grid (paper, edges, surround) beneath raster and ink.
@@ -369,7 +397,16 @@ class InkView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Set the pan/zoom. An explicit transform wins over a fit that has not applied yet
+     * (stage 36), so a caller's view is never replaced by a late fit.
+     */
     fun setTransform(scale: Float, tx: Float, ty: Float) {
+        pendingFit = false
+        applyTransform(scale, tx, ty)
+    }
+
+    private fun applyTransform(scale: Float, tx: Float, ty: Float) {
         transform.scale = scale
         transform.tx = tx
         transform.ty = ty
@@ -378,22 +415,55 @@ class InkView @JvmOverloads constructor(
         invalidate()
     }
 
+    /**
+     * Stage 36: fit the whole page grid to the view — centred, a 16 dp margin, scale clamped to
+     * the transform's range. Applied at the next draw (after layout, so at the laid-out size and
+     * never at 0 × 0) and, while a stroke is being written, only after its pen-up.
+     */
+    fun fitToPageGrid() {
+        pendingFit = true
+        invalidate()
+    }
+
+    /** Stage 36 (tests): the fitted transform `[scale, tx, ty]` for the current grid and size. */
+    @VisibleForTesting
+    fun fittedTransform(): FloatArray {
+        val fit = fitFor(width, height)
+        return floatArrayOf(fit.scale, fit.tx, fit.ty)
+    }
+
+    private fun fitFor(w: Int, h: Int): CanvasTransform.Fit = CanvasTransform.fittingGrid(
+        pageExtent, canvasWidthCu, canvasHeightCu, w, h, fitMarginPx, transform.minScale, transform.maxScale,
+    )
+
+    /** Stage 36: apply a pending fit once the view has a real size and no stroke is live. */
+    private fun applyPendingFit() {
+        if (!pendingFit || width <= 0 || height <= 0 || drawing) return
+        pendingFit = false
+        val fit = fitFor(width, height)
+        applyTransform(fit.scale, fit.tx, fit.ty)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        // Stage 36: a size change never re-fits by itself; the view keeps its transform.
         reportViewport()
     }
 
     /** Stage 35: report the visible canvas-unit rect (nothing until the view has a size). */
     private fun reportViewport() {
-        val cb = onViewportChanged ?: return
         if (width <= 0 || height <= 0 || !(transform.scale > 0f)) return
-        val s = transform.scale.toDouble()
-        cb(
-            (0.0 - transform.tx) / s,
-            (0.0 - transform.ty) / s,
-            (width - transform.tx.toDouble()) / s,
-            (height - transform.ty.toDouble()) / s,
-        )
+        onViewportChanged?.let { cb ->
+            val s = transform.scale.toDouble()
+            cb(
+                (0.0 - transform.tx) / s,
+                (0.0 - transform.ty) / s,
+                (width - transform.tx.toDouble()) / s,
+                (height - transform.ty.toDouble()) / s,
+            )
+        }
+        // Stage 36: a transform about to be replaced by a fit is not worth keeping.
+        if (!pendingFit) onViewTransformChanged?.invoke(transform.scale, transform.tx, transform.ty)
     }
 
     /**
@@ -407,6 +477,8 @@ class InkView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        // Stage 36: a requested fit lands here, after layout, at the view's real size.
+        if (pendingFit) applyPendingFit()
         // Stage 32: the page grid (surround, paper, edges) beneath everything; stage 34 adds
         // the ghost ring around it when the canvas is expandable.
         pagePainter.draw(canvas, transform, canvasWidthCu, canvasHeightCu, pageExtent, ring = expandableCanvas)
@@ -997,6 +1069,8 @@ class InkView @JvmOverloads constructor(
         lastFocusX = fx
         lastFocusY = fy
         lastSpan = span
+        // Stage 36: the user moved the view; a fit still waiting must not undo that.
+        pendingFit = false
         onTransformChanged()
         reportViewport()
         invalidate()
@@ -1086,6 +1160,9 @@ class InkView @JvmOverloads constructor(
 
     companion object {
         const val ERASER_RADIUS_CU = 12f
+
+        /** Stage 36: [fitRequestHandled] before any fit request was taken. */
+        const val NO_FIT_REQUEST = -1
 
         @Volatile
         private var memoryClassLogged = false

@@ -29,6 +29,9 @@ import org.junit.runner.RunWith
  * scrollable strip and pins a trailing overflow (⋮) that carries Settings, so Settings is
  * reachable at both a portrait (~800 dp) and a landscape (~1280 dp) toolbar width. Composed
  * with [CanvasViewModel.sendEnabled] on so the full send-loop toolbar is present.
+ *
+ * Stage 36: the Fit control is pinned beside the overflow by the same convention, so it is
+ * displayed (never clipped) at both widths and one tap restores the fitted view.
  */
 @RunWith(AndroidJUnit4::class)
 class CanvasToolbarInstrumentedTest {
@@ -59,7 +62,7 @@ class CanvasToolbarInstrumentedTest {
         db.close()
     }
 
-    private fun assertSettingsReachableAt(widthDp: Int) {
+    private fun setToolbarWidth(widthDp: Int) {
         composeRule.setContent {
             Box(modifier = Modifier.size(width = widthDp.dp, height = 1000.dp)) {
                 CanvasScreen(
@@ -69,6 +72,10 @@ class CanvasToolbarInstrumentedTest {
                 )
             }
         }
+    }
+
+    private fun assertSettingsReachableAt(widthDp: Int) {
+        setToolbarWidth(widthDp)
         // The pinned overflow is always displayed regardless of the toolbar's width.
         composeRule.waitUntil(5_000) {
             composeRule.onAllNodesWithTag(CanvasTags.OVERFLOW).fetchSemanticsNodes().isNotEmpty()
@@ -90,5 +97,27 @@ class CanvasToolbarInstrumentedTest {
     @Test
     fun settings_reachable_at_landscape_width() {
         assertSettingsReachableAt(1280)
+    }
+
+    private fun assertFitReachableAt(widthDp: Int) {
+        setToolbarWidth(widthDp)
+        composeRule.waitUntil(5_000) {
+            composeRule.onAllNodesWithTag(CanvasTags.FIT).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithTag(CanvasTags.FIT).assertIsDisplayed()
+        val before = viewModel.fitRequest
+        composeRule.onNodeWithTag(CanvasTags.FIT).performClick()
+        composeRule.waitForIdle()
+        org.junit.Assert.assertEquals("Fit asks for the fitted view", before + 1, viewModel.fitRequest)
+    }
+
+    @Test
+    fun fit_reachable_at_portrait_width() {
+        assertFitReachableAt(800)
+    }
+
+    @Test
+    fun fit_reachable_at_landscape_width() {
+        assertFitReachableAt(1280)
     }
 }

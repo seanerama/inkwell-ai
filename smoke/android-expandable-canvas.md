@@ -1,11 +1,13 @@
-# UI-smoke: Android expandable canvas (stages 34–35, ADR-0014 §2, §4–§6)
+# UI-smoke: Android expandable canvas (stages 34–36, ADR-0014 §2, §4–§6)
 
 Manual "observably-works" check for the **Operator**, run on the real tablet (Lenovo Idea
 Tab Pro, Android 14) with the active stylus. It covers the ghost ring, writing into it to
 add pages in any direction, the 8-page cap, the grid surviving a reopen and (stage 35)
 agent jobs that send **what is on screen**: Ask about writing on page 2, the "Zoom in to
-send" floor, and Formalize from a region. Browser smoke does not apply to a native client
-(ADR-0001), so this human pass is the replacement.
+send" floor, and Formalize from a region. Stage 36 adds **fit to screen**: every canvas
+opens with its whole page grid on screen (so Ask on a fresh note sends the whole page
+again), and a **Fit** button brings that view back (section 11). Browser smoke does not
+apply to a native client (ADR-0001), so this human pass is the replacement.
 
 ## Preconditions
 
@@ -20,8 +22,10 @@ send" floor, and Formalize from a region. Browser smoke does not apply to a nati
 
 ## 1. The ghost ring
 
-1. In the Library create a new canvas and open it. Pinch out (two fingers) until the whole
-   page and some space around it are visible.
+1. In the Library create a new canvas and open it.
+   - *Expected (stage 36):* the **whole page** is on screen, centred, with a small margin
+     around it — not just its top half.
+   Pinch out (two fingers) until some space around the page is visible.
    - *Expected:* the white page with its edge and shadow (stage 32), and around it a
      **faint ring of eight pages** — left, right, above, below and the four corners — drawn
      as pale paper with **dashed** edges. Beyond the ring is the plain surround.
@@ -143,7 +147,8 @@ send" floor, and Formalize from a region. Browser smoke does not apply to a nati
 
 21. Draw a small box-and-arrow sketch on the **second page**. With only the second page on
     screen, open the Note sheet, pick **Formalize** and send.
-    - *Expected:* a new canvas "<title> — formalized" opens; the clean diagram matches the
+    - *Expected:* a new canvas "<title> — formalized" opens **fully visible** (fitted to the
+      screen, stage 36); the clean diagram matches the
       sketch's layout and fills the new canvas the same way the sketch filled the screen
       region (the new canvas is the size of the exported region, not stretched or shifted).
     - *Expected screenshot E:* the formalized canvas beside the sketch.
@@ -161,9 +166,43 @@ send" floor, and Formalize from a region. Browser smoke does not apply to a nati
     Operator result (fill in):
     - [ ] canary passes: __________
 
+## 11. Fit to screen (stage 36)
+
+23. Open an existing single-page note that has writing near the **bottom** of the page.
+    - *Expected:* the whole page is visible at once, centred, with a small margin; nothing
+      is cut off at the bottom.
+24. Without panning or zooming, tap **Send** (Ask).
+    - *Expected:* the answer is about **the whole page**, including the writing at the
+      bottom (before stage 36 a fresh note sent only its top half on this tablet).
+25. Open the multi-page canvas from section 7 (or any canvas with 2+ pages).
+    - *Expected:* **all its pages** are on screen at once. (A grid 3+ pages long on one axis
+      may show "Zoom in to send" once fitted — that is the stage 35 floor, expected.)
+26. On a fitted single-page note, write a stroke from inside the page out into the ghost
+    ring next to it (the margin or the space beside the page).
+    - *Expected:* the page is added on pen-up and the view **does not jump** — the page you
+      were writing on stays exactly where it was on screen.
+27. Pan and zoom somewhere else, then tap **Fit** (pinned at the right end of the toolbar,
+    beside ⋮).
+    - *Expected:* the whole grid is back on screen, centred. Fit is visible without
+      scrolling the toolbar in both portrait and landscape.
+28. Rotate the tablet (or resize the window) while zoomed in on part of a page.
+    - *Expected:* the view is not re-fitted by the rotation; tap **Fit** to fit it.
+29. Repeat step 27 with Settings → Ink → **Low-latency pen** on (the default) and write
+    right after tapping Fit.
+    - *Expected:* the ink appears under the pen tip and stays exactly where it was written
+      after pen-up (no offset, no jump).
+
+    Operator result (fill in):
+    - [ ] a note opens with the whole page visible: __________
+    - [ ] Ask on a fresh note answers about the whole page: __________
+    - [ ] a multi-page canvas opens with all pages visible: __________
+    - [ ] writing into the ring grows the page without the view jumping: __________
+    - [ ] Fit brings the whole grid back: __________
+    - [ ] low-latency ink after Fit lands under the pen: __________
+
 ## Kill switch (EXPANDABLE_CANVAS = false)
 
-23. On a build with `EXPANDABLE_CANVAS` flipped to `false`, open any canvas.
+30. On a build with `EXPANDABLE_CANVAS` flipped to `false`, open any canvas.
     - *Expected:* no ghost ring; a stroke started outside the page does not start; a
       stroke written from the page across its edge is cut off at the edge while you write
       and after pen-up (the fixed page, as before stage 34). Ask still sends what is on
