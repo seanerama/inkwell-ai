@@ -167,7 +167,12 @@ android {
             // or marker stroke start in the grid or the ring, and grows the grid by whole pages
             // in any direction on pen-up (8-page cap per axis). OFF = the fixed page with
             // visible edges (stage 32): no ring, no growth, strokes start only on the grid and
-            // the live stroke is clipped at its edge. ON in debug so it can be tested.
+            // the live stroke is clipped at its edge. Documented release-ON exception since
+            // stage 35 (same rationale as LIBRARY/FORMALIZE/…/LOW_LATENCY_INK): default ON in
+            // debug AND release, because prod is not promoted, staging is the only environment,
+            // and stage 35 made Ask/Annotate/Formalize export the visible region, so new pages
+            // are never hidden from the agent. Flip to "false" to restore the fixed page grid
+            // without a code change.
             buildConfigField("boolean", "EXPANDABLE_CANVAS", "true")
         }
         getByName("release") {
@@ -226,10 +231,14 @@ android {
             // runtime switches in Settings default on / Responsive (stage 33). Flip to "false" to
             // hide the Ink settings and keep today's pen path without a code change.
             buildConfigField("boolean", "LOW_LATENCY_INK", "true")
-            // Stage 34 expandable canvas: OFF in release (NOT a release-ON exception). Growing a
-            // canvas while Ask still exports only page (0,0) would silently hide the new pages
-            // from the agent; stage 35 (region export) flips this ON.
-            buildConfigField("boolean", "EXPANDABLE_CANVAS", "false")
+            // Stage 34/35 expandable canvas: ON in release by documented exception (see the debug
+            // block and the stage-35 spec). Stage 34 kept it OFF because growing a canvas while
+            // Ask exported only page (0,0) would have hidden the new pages from the agent; stage
+            // 35 exports the visible region (viewport ∩ page grid, legibility floor) and maps
+            // agent markup through each job's region, so it is ON. Flip to "false" (the stage-34
+            // kill switch) to restore the fixed page grid — no ring, no growth — without a code
+            // change; region export stays correct either way (a one-page grid).
+            buildConfigField("boolean", "EXPANDABLE_CANVAS", "true")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             if (hasReleaseSigning) {

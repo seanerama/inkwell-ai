@@ -162,8 +162,9 @@ class CanvasViewModelSpacesTest {
         )
     }
 
-    private val fakeExporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result = { w, h, _ ->
-        CanvasExporter.Result.Success(CoordinateMapping.export(w, h), byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+    // Stage 35: the exporter is handed the region (viewport ∩ grid; the whole page here).
+    private val fakeExporter: (CoordinateMapping.Region, List<ExportLayer>) -> CanvasExporter.Result = { region, _ ->
+        CanvasExporter.Result.Success(CoordinateMapping.export(region), byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
     }
 
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }

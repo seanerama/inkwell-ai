@@ -120,4 +120,47 @@ class JobRequestBuilderTest {
             assertTrue("meta omitted when no usable title", !obj.containsKey("meta"))
         }
     }
+
+    // --- Stage 35: region export (contract device-api "ADR-0014 additions") ---
+
+    @Test
+    fun export_always_carries_the_origin_keys_including_zero() {
+        val obj = json.parseToJsonElement(json.encodeToString(JobCreateRequest.serializer(), buildDefault())).jsonObject
+        val export = obj["export"]!!.jsonObject
+        assertEquals(setOf("w", "h", "width_cu", "height_cu", "origin_x_cu", "origin_y_cu"), export.keys)
+        assertEquals(0, export["origin_x_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, export["origin_y_cu"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun a_region_export_sends_its_size_and_origin_including_negative_values() {
+        // The device-api example: a landscape region one page right of the origin.
+        val right = JobRequestBuilder.exportJson(CoordinateMapping.export(CoordinateMapping.Region(2480, 0, 3508, 2480)))
+        assertEquals(1568, right["w"]!!.jsonPrimitive.content.toInt())
+        assertEquals(1109, right["h"]!!.jsonPrimitive.content.toInt())
+        assertEquals(3508, right["width_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(2480, right["height_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(2480, right["origin_x_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, right["origin_y_cu"]!!.jsonPrimitive.content.toInt())
+
+        val upLeft = JobRequestBuilder.exportJson(CoordinateMapping.export(CoordinateMapping.Region(-2480, -1754, 2480, 3508)))
+        assertEquals(-2480, upLeft["origin_x_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(-1754, upLeft["origin_y_cu"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun region_of_reads_an_export_back_and_defaults_a_missing_origin_to_zero() {
+        val region = CoordinateMapping.Region(-2480, 100, 3000, 2000)
+        assertEquals(region, JobRequestBuilder.regionOf(JobRequestBuilder.exportJson(CoordinateMapping.export(region))))
+        val legacy = json.parseToJsonElement("""{"w":1109,"h":1568,"width_cu":2480,"height_cu":3508}""").jsonObject
+        assertEquals(CoordinateMapping.Region(0, 0, 2480, 3508), JobRequestBuilder.regionOf(legacy))
+        // No usable size → no region (the UI then maps the job as origin (0,0) over the page).
+        assertEquals(null, JobRequestBuilder.regionOf(null))
+        assertEquals(null, JobRequestBuilder.regionOf(json.parseToJsonElement("""{"w":1,"h":1}""").jsonObject))
+        assertEquals(null, JobRequestBuilder.regionOf(json.parseToJsonElement("""{"width_cu":0,"height_cu":5}""").jsonObject))
+        assertEquals(null, JobRequestBuilder.regionOf(json.parseToJsonElement("""{"width_cu":"2480","height_cu":5}""").jsonObject))
+        // A malformed origin is 0.
+        val badOrigin = json.parseToJsonElement("""{"width_cu":10,"height_cu":20,"origin_x_cu":"x","origin_y_cu":1.5}""").jsonObject
+        assertEquals(CoordinateMapping.Region(0, 0, 10, 20), JobRequestBuilder.regionOf(badOrigin))
+    }
 }

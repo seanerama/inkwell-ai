@@ -27,6 +27,7 @@ import com.inkwell.net.OfflineJobQueue
 import com.inkwell.render.AnchorHitTest
 import com.inkwell.render.AnnotationRenderer
 import com.inkwell.render.CanvasExporter
+import com.inkwell.render.CoordinateMapping
 import com.inkwell.render.ExportLayer
 import com.inkwell.render.RenderStroke
 import com.inkwell.render.StrokeMapper
@@ -102,9 +103,12 @@ class CanvasViewModel(
     /** Per-card state persistence (Room-backed in the app; null in lightweight tests). */
     private val cardStatePersistence: CardStatePersistence? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.Default,
-    /** The canvas exporter (contract coordinate-mapping); injectable so `send()` is JVM-testable. */
-    private val exporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result =
-        { w, h, layers -> CanvasExporter.export(w, h, layers) },
+    /**
+     * The canvas exporter (contract coordinate-mapping); injectable so `send()` is JVM-testable.
+     * Stage 35: it exports a region (viewport ∩ page grid). Null = the real
+     * [CanvasExporter] over the open canvas's page size and grid.
+     */
+    private val exporter: ((CoordinateMapping.Region, List<ExportLayer>) -> CanvasExporter.Result)? = null,
     /**
      * Stage 11: when true (the flag-OFF / legacy path) the ViewModel opens the default
      * canvas on creation. With the Library ([BuildConfig.LIBRARY]) on, MainActivity drives
@@ -120,9 +124,10 @@ class CanvasViewModel(
      */
     private val pushedRasterSource: com.inkwell.render.PushedRasterSource? = null,
     /**
-     * Stage 34 kill-switch ([BuildConfig.EXPANDABLE_CANVAS]; ON in debug, OFF in release until
-     * stage 35): ON → a committed stroke grows the page grid by whole pages in any direction
-     * (8-page cap), persisted in the same transaction as the stroke; OFF → the fixed page grid.
+     * Stage 34 kill-switch ([BuildConfig.EXPANDABLE_CANVAS]; ON in debug, and in release since
+     * stage 35 made agent jobs export the visible region): ON → a committed stroke grows the
+     * page grid by whole pages in any direction (8-page cap), persisted in the same transaction
+     * as the stroke; OFF → the fixed page grid.
      */
     val expandableCanvas: Boolean = BuildConfig.EXPANDABLE_CANVAS,
 ) : ViewModel() {
@@ -144,6 +149,23 @@ class CanvasViewModel(
      * with the viewport. Within one open canvas it never shrinks (undo and erase keep it).
      */
     var pageExtent by mutableStateOf(com.inkwell.data.PageExtent.SINGLE)
+        private set
+
+    /**
+     * Stage 35: the canvas-unit rect the canvas view shows (`[left, top, right, bottom)`),
+     * reported by the view on every pan/zoom. Deliberately NOT snapshot state — it changes
+     * every gesture frame; only [sendBlockedHint], which changes rarely, is observed.
+     * Null until the view has reported (then the whole grid is the region).
+     */
+    private var viewportCu: DoubleArray? = null
+
+    /**
+     * Stage 35 (ADR-0014 §4): why Send / Ask / the job-type picker are disabled right now,
+     * shown inline — [ZOOM_IN_HINT] when the visible region is past the legibility floor
+     * (longest edge > 2 × the page's), [NO_REGION_HINT] when no page is on screen — or null
+     * when a job can be sent. Recomputed on every transform, grid or canvas change.
+     */
+    var sendBlockedHint by mutableStateOf<String?>(null)
         private set
 
     /**
@@ -218,6 +240,15 @@ class CanvasViewModel(
 
     /** Annotations currently rendered on the agent layer (every type: native or fallback). */
     var agentAnnotations by mutableStateOf<List<Annotation>>(emptyList())
+        private set
+
+    /**
+     * Stage 35 (ADR-0014 §5): the export region of the job [agentAnnotations] came from — set
+     * together with them. Rendering, anchors and hit-testing map through it, never through the
+     * canvas's current bounds, so later growth never moves the markup. Null = origin (0,0)
+     * over the page (a job with no recorded region). In memory only, like the annotations.
+     */
+    var agentRegion by mutableStateOf<CoordinateMapping.Region?>(null)
         private set
 
     /** Agent-layer visibility toggled from the layer tray. */
@@ -346,11 +377,16 @@ class CanvasViewModel(
         canvasWidth = state.widthCu
         canvasHeight = state.heightCu
         pageExtent = state.pageExtent
+        refreshSendGate()
         strokes.clear()
         strokes.addAll(state.strokes.map(StrokeMapper::toRenderStroke))
         // Stage 12: if this is the freshly opened redraw canvas, show its diagram + card.
         pendingRedraw?.takeIf { it.canvasId == state.canvasId }?.let { redraw ->
             agentAnnotations = redraw.annotations
+            // Stage 35: a redraw maps 1:1 onto its new canvas at origin (0,0), through the
+            // size the SERVER gave that canvas (stored with it) — never the size the device
+            // asked for — so an older server that sized it from the source cannot stretch it.
+            agentRegion = CoordinateMapping.Region.page(state.widthCu, state.heightCu)
             annotationsById = redraw.annotations.associateBy { it.id }
             agentLayerVisible = true
             panel = redraw.panel
@@ -380,6 +416,7 @@ class CanvasViewModel(
         ready = false
         panel = null
         agentAnnotations = emptyList()
+        agentRegion = null
         canvasRaster = null
         viewModelScope.launch {
             repository.openCanvas(canvasId)?.let { applyState(it) }
@@ -447,12 +484,14 @@ class CanvasViewModel(
         pageExtent = com.inkwell.data.PageGrowth.grow(
             pageExtent, commit.stroke.points, commit.stroke.pointCount, canvasWidth, canvasHeight,
         )
+        refreshSendGate()
         viewModelScope.launch {
             val result = repository.insertStrokeWithGrowth(canvasId = cid, layerId = layerId, commit = data)
             if (canvasId != cid) return@launch // another canvas opened meanwhile
             result.pageExtent?.let { stored ->
                 val merged = com.inkwell.data.PageGrowth.union(pageExtent, stored)
                 pageExtent = if (merged.isValid) merged else stored
+                refreshSendGate()
             }
             if (result.capped) canvasNotice = CAP_NOTICE
             strokes.add(StrokeMapper.toRenderStroke(result.stroke))
@@ -487,8 +526,23 @@ class CanvasViewModel(
     fun exportPreview() {
         viewModelScope.launch {
             val layers = listOf(ExportLayer(z = 0, visible = true, strokes = strokes.toList()))
-            val result = withContext(Dispatchers.Default) {
-                CanvasExporter.export(canvasWidth, canvasHeight, layers)
+            // Stage 35: preview exactly what Send would export (the visible region).
+            val region = currentExportRegion() ?: CoordinateMapping.Region.page(canvasWidth, canvasHeight)
+            val w = canvasWidth
+            val h = canvasHeight
+            val grid = pageExtent
+            val result = try {
+                withContext(Dispatchers.Default) { CanvasExporter.export(region, w, h, grid, layers) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                exportInfo = exportFailedMessage(e)
+                showExportPreview = true
+                return@launch
+            } catch (e: OutOfMemoryError) {
+                exportInfo = exportFailedMessage(e)
+                showExportPreview = true
+                return@launch
             }
             when (result) {
                 is CanvasExporter.Result.Success -> {
@@ -497,7 +551,9 @@ class CanvasViewModel(
                     }
                     exportBitmap = bmp
                     exportInfo = "${result.export.w} × ${result.export.h} px  " +
-                        "(${result.png.size / 1024} KB)"
+                        "(${result.png.size / 1024} KB)  region ${region.widthCu} × ${region.heightCu} CU " +
+                        "at (${region.originX}, ${region.originY})" +
+                        (sendBlockedHint?.let { "  — $it" } ?: "")
                 }
                 is CanvasExporter.Result.TooLarge -> {
                     exportBitmap = null
@@ -518,6 +574,59 @@ class CanvasViewModel(
     fun toggleFixture() {
         fixtureVisible = !fixtureVisible
     }
+
+    // --- Stage 35: the export region (viewport ∩ page grid) and the legibility floor ---
+
+    /**
+     * The canvas view reports the canvas-unit rect it shows (on every pan/zoom and resize).
+     * Only the send gate is recomputed; nothing observable changes unless it flips.
+     */
+    fun onViewportChanged(leftCu: Double, topCu: Double, rightCu: Double, bottomCu: Double) {
+        viewportCu = doubleArrayOf(leftCu, topCu, rightCu, bottomCu)
+        refreshSendGate()
+    }
+
+    /**
+     * The region an agent job exports right now (ADR-0014 §4): the viewport intersected with
+     * the page-grid bounds, snapped to whole CU — or the whole grid before the view has
+     * reported a viewport. Null when the viewport shows no page, or only a sliver of one
+     * whose export would be under [CoordinateMapping.MIN_EXPORT_SIDE_PX] on a side. A
+     * single-page canvas seen whole is `(0, 0, width, height)`, the v1 export.
+     */
+    fun currentExportRegion(): CoordinateMapping.Region? {
+        val grid = pageExtent
+        val w = canvasWidth
+        val h = canvasHeight
+        if (w <= 0 || h <= 0) return null
+        val gl = grid.minCol.toLong() * w
+        val gt = grid.minRow.toLong() * h
+        val gr = (grid.maxCol + 1).toLong() * w
+        val gb = (grid.maxRow + 1).toLong() * h
+        val v = viewportCu
+        val region = if (v == null) {
+            CoordinateMapping.visibleRegion(gl.toDouble(), gt.toDouble(), gr.toDouble(), gb.toDouble(), gl, gt, gr, gb)
+        } else {
+            CoordinateMapping.visibleRegion(v[0], v[1], v[2], v[3], gl, gt, gr, gb)
+        }
+        return region?.takeIf { CoordinateMapping.isExportable(it) }
+    }
+
+    /** Recompute [sendBlockedHint] from the current viewport, grid and page size. */
+    private fun refreshSendGate() {
+        val region = currentExportRegion()
+        sendBlockedHint = when {
+            region == null -> NO_REGION_HINT
+            CoordinateMapping.belowLegibilityFloor(region, canvasWidth, canvasHeight) -> ZOOM_IN_HINT
+            else -> null
+        }
+    }
+
+    /** Stage 35: the inline send status for an export that failed (never a crash). */
+    private fun exportFailedMessage(e: Throwable): String =
+        "Could not export the canvas: ${e.message ?: e.javaClass.simpleName}"
+
+    /** True when Send / Ask / the job-type picker may be used (online and not blocked). */
+    val canSend: Boolean get() = online && sendBlockedHint == null
 
     // --- Stage 6/7: send flow (SPEC §9.4) ---
 
@@ -636,6 +745,10 @@ class CanvasViewModel(
         if (!sendEnabled) return
         showInstruction = false
         val cId = canvasId ?: run { sendStatus = "Canvas not ready yet."; return }
+        // Stage 35: export what is on screen — never a region past the legibility floor.
+        refreshSendGate()
+        sendBlockedHint?.let { sendStatus = it; return }
+        val region = currentExportRegion() ?: run { sendStatus = NO_REGION_HINT; return }
         val dev = deviceRepositoryProvider() ?: run {
             sendStatus = "Not paired — set the server URL and token in Settings."
             return
@@ -649,14 +762,32 @@ class CanvasViewModel(
             // a pushed canvas composites its raster BENEATH ink (SPEC §5.2) so the agent sees
             // the document with the marks together; an ordinary canvas has no rasters and takes
             // the injected [exporter] path unchanged.
+            // Stage 35: the region (viewport ∩ grid) captured at tap time is what is exported,
+            // and it travels with the job's result.
             val exportLayers = listOf(ExportLayer(z = 0, visible = true, strokes = strokes.toList()))
-            val result = withContext(ioDispatcher) {
-                val exportRasters = pushedRasterSource?.exportRastersFor(cId) ?: emptyList()
-                if (exportRasters.isEmpty()) {
-                    exporter(canvasWidth, canvasHeight, exportLayers)
-                } else {
-                    CanvasExporter.export(canvasWidth, canvasHeight, exportLayers, exportRasters)
+            val pageW = canvasWidth
+            val pageH = canvasHeight
+            val grid = pageExtent
+            // An export failure (allocation, an incomplete render) is a send error, never a
+            // crash: it is shown inline and nothing is posted.
+            val result = try {
+                withContext(ioDispatcher) {
+                    val exportRasters = pushedRasterSource?.exportRastersFor(cId) ?: emptyList()
+                    val inject = exporter
+                    if (exportRasters.isEmpty() && inject != null) {
+                        inject(region, exportLayers)
+                    } else {
+                        CanvasExporter.export(region, pageW, pageH, grid, exportLayers, exportRasters)
+                    }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                sendStatus = exportFailedMessage(e)
+                return@launch
+            } catch (e: OutOfMemoryError) {
+                sendStatus = exportFailedMessage(e)
+                return@launch
             }
             val (png, export) = when (result) {
                 is CanvasExporter.Result.Success -> result.png to result.export
@@ -771,6 +902,9 @@ class CanvasViewModel(
 
         // done: render every annotation and open the panel with the summary + cards.
         agentAnnotations = outcome.annotations
+        // Stage 35: the job's own region travels with its annotations (origin (0,0) over the
+        // page for a job that recorded none).
+        agentRegion = outcome.region ?: CoordinateMapping.Region.page(canvasWidth, canvasHeight)
         annotationsById = outcome.annotations.associateBy { it.id }
         agentLayerVisible = true
         anchorPulses = emptyList()
@@ -872,7 +1006,10 @@ class CanvasViewModel(
     fun onCardTapped(card: PanelCard) {
         if (!cardActionsEnabled) return
         val regions = card.anchors.map { AnchorHitTest.AnchorRegion(it.annotationId, it.region) }
-        val rects = AnchorHitTest.rectsForAnchors(regions, annotationsById, canvasWidth, canvasHeight)
+        val job = markupRegion()
+        val rects = AnchorHitTest.rectsForAnchors(
+            regions, annotationsById, job.widthCu, job.heightCu, job.originX, job.originY,
+        )
         if (rects.isEmpty()) return
         anchorPulses = rects
         val token = ++pulseToken
@@ -893,11 +1030,17 @@ class CanvasViewModel(
         val cardAnchors = cards.map { card ->
             card.anchors.map { AnchorHitTest.AnchorRegion(it.annotationId, it.region) }
         }
+        val job = markupRegion()
         val index = AnchorHitTest.cardIndexForTap(
-            xCu.toDouble(), yCu.toDouble(), cardAnchors, annotationsById, canvasWidth, canvasHeight,
+            xCu.toDouble(), yCu.toDouble(), cardAnchors, annotationsById, job.widthCu, job.heightCu,
+            originX = job.originX, originY = job.originY,
         )
         if (index != null) selectedCardIndex = index
     }
+
+    /** Stage 35: the region the shown markup maps through (the job's; else the page at (0,0)). */
+    private fun markupRegion(): CoordinateMapping.Region =
+        agentRegion ?: CoordinateMapping.Region.page(canvasWidth, canvasHeight)
 
     /** The UI calls this once it has expanded/scrolled to [selectedCardIndex]. */
     fun onCardSelectionConsumed() { selectedCardIndex = null }
@@ -916,7 +1059,8 @@ class CanvasViewModel(
                 offlineQueue.flush { pending ->
                     val queued = dev.submitAgentJob(pending.request)
                     val terminal = dev.pollUntilTerminal(queued.id, dev.sync(null).cursor)
-                    applyOutcome(handler.handle(terminal, cId))
+                    // Stage 35: the queued request's region travels with its result.
+                    applyOutcome(handler.handle(terminal, cId, JobRequestBuilder.regionOf(pending.request.export)))
                 }
             } catch (e: Exception) {
                 sendStatus = "Reconnect flush failed: ${e.message ?: e.javaClass.simpleName}"
@@ -960,6 +1104,12 @@ class CanvasViewModel(
 
         /** Stage 34: shown when a stroke reached past the 8-page cap (ADR-0014 §2). */
         const val CAP_NOTICE = "Canvas is at its 8-page limit this way"
+
+        /** Stage 35: the visible region is past the legibility floor (ADR-0014 §4). */
+        const val ZOOM_IN_HINT = "Zoom in to send"
+
+        /** Stage 35: the view shows no page of the canvas, so there is nothing to send. */
+        const val NO_REGION_HINT = "Scroll to a page to send"
 
         /** How long a card-tap anchor pulse stays lit on the canvas (SPEC §4.7 ~1.5 s). */
         const val ANCHOR_PULSE_MS = 1_500L

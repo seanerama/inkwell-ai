@@ -5,12 +5,16 @@ import com.inkwell.data.CanvasEntity
 import com.inkwell.data.CanvasRepository
 import com.inkwell.data.LayerEntity
 import com.inkwell.data.LayerRepository
+import com.inkwell.data.PackedPoints
+import com.inkwell.data.PageExtent
 import com.inkwell.data.SpaceEntity
 import com.inkwell.data.StrokeEntity
 import com.inkwell.data.dao.CanvasDao
 import com.inkwell.data.dao.LayerDao
 import com.inkwell.data.dao.SpaceDao
 import com.inkwell.data.dao.StrokeDao
+import com.inkwell.ink.BuiltStroke
+import com.inkwell.ink.StrokeCommit
 import com.inkwell.net.CardActionResponse
 import com.inkwell.net.CardResponse
 import com.inkwell.net.CardStateRequest
@@ -26,6 +30,7 @@ import com.inkwell.render.CoordinateMapping
 import com.inkwell.render.ExportLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
@@ -226,8 +231,9 @@ class CanvasViewModelSendTest {
 
     private lateinit var api: FakeDeviceApi
 
-    private val fakeExporter: (Int, Int, List<ExportLayer>) -> CanvasExporter.Result = { w, h, _ ->
-        CanvasExporter.Result.Success(CoordinateMapping.export(w, h), byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+    // Stage 35: the exporter is handed the region (viewport ∩ grid; the whole page here).
+    private val fakeExporter: (CoordinateMapping.Region, List<ExportLayer>) -> CanvasExporter.Result = { region, _ ->
+        CanvasExporter.Result.Success(CoordinateMapping.export(region), byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
     }
 
     // Uses explicitNulls=false like the production ApiClient, so a null instruction is omitted.
@@ -246,17 +252,31 @@ class CanvasViewModelSendTest {
 
     // These tests exercise the Stage-7 one-tap-ask flow, so card actions (the Stage-10
     // picker) default OFF here; Stage-10 behaviour is covered by its own tests.
+    /** Stage 35: the regions the exporter was asked for, in order. */
+    private val exportedRegions = mutableListOf<CoordinateMapping.Region>()
+
+    /** Stage 35 review: when set, the exporter throws this (an allocation failure, say). */
+    private var exportFailure: Throwable? = null
+
     private fun viewModel(
         oneTapAsk: Boolean = true,
         cardActionsEnabled: Boolean = false,
         formalizeEnabled: Boolean = false,
         brainEnabled: Boolean = false,
+        // Stage 35: seed the default canvas's page grid before it opens.
+        grid: PageExtent? = null,
     ): CanvasViewModel {
         val layerDao = FakeLayerDao()
         val repo = CanvasRepository(
             spaceDao = FakeSpaceDao(), canvasDao = FakeCanvasDao(), layerDao = layerDao, strokeDao = FakeStrokeDao(),
             idGen = { "id-${System.nanoTime()}" }, clock = { 1L },
         )
+        if (grid != null) {
+            runBlocking {
+                val id = repo.openDefaultCanvas().canvasId
+                repo.updatePageExtent(id, grid)
+            }
+        }
         return CanvasViewModel(
             repository = repo,
             layerRepository = LayerRepository(layerDao, idGen = { "agent-layer" }, clock = { 1L }),
@@ -268,7 +288,11 @@ class CanvasViewModelSendTest {
             brainEnabled = brainEnabled,
             formalizedCanvasStore = repo,
             ioDispatcher = dispatcher,
-            exporter = fakeExporter,
+            exporter = { region, layers ->
+                exportedRegions += region
+                exportFailure?.let { throw it }
+                fakeExporter(region, layers)
+            },
             // These Stage-7/10/12 send tests exercise the flag-OFF space path (resolve the
             // "work" space by slug). The Stage-14 canvas-space send path has its own test.
             spacesEnabled = false,
@@ -410,6 +434,206 @@ class CanvasViewModelSendTest {
         // The text annotation reached the agent layer (rendered, never dropped).
         assertEquals(1, vm.agentAnnotations.size)
         assertTrue(vm.agentLayerVisible)
+    }
+
+    // --- Stage 35: agent jobs export the visible region ---
+
+    private val pageW = CoordinateMapping.DEFAULT_WIDTH_CU // 2480
+    private val pageH = CoordinateMapping.DEFAULT_HEIGHT_CU // 3508
+
+    /** A committed pen stroke through the given canvas-unit points. */
+    private fun stroke(vararg xy: Pair<Float, Float>): StrokeCommit {
+        val pts = FloatArray(xy.size * PackedPoints.STRIDE)
+        xy.forEachIndexed { i, (x, y) ->
+            val o = i * PackedPoints.STRIDE
+            pts[o] = x; pts[o + 1] = y; pts[o + 2] = 0.5f; pts[o + 4] = i * 4f
+        }
+        val minX = xy.minOf { it.first }; val maxX = xy.maxOf { it.first }
+        val minY = xy.minOf { it.second }; val maxY = xy.maxOf { it.second }
+        return StrokeCommit(BuiltStroke(pts, xy.size, minX, minY, maxX - minX, maxY - minY), "pen", "#111111", 3f)
+    }
+
+    @Test
+    fun single_page_seen_whole_exports_the_page_at_origin_zero() {
+        val vm = viewModel()
+        // The view shows the whole page and some surround.
+        vm.onViewportChanged(-300.0, -200.0, 2700.0, 3700.0)
+        vm.send()
+        assertEquals(CoordinateMapping.Region(0, 0, pageW, pageH), exportedRegions.single())
+        val export = wireBody(api.submitted.single())["export"]!!.jsonObject
+        assertEquals(0, export["origin_x_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, export["origin_y_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(pageW, export["width_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(pageH, export["height_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(CoordinateMapping.Region(0, 0, pageW, pageH), vm.agentRegion)
+    }
+
+    @Test
+    fun before_the_view_reports_the_whole_grid_is_the_region() {
+        val vm = viewModel(grid = PageExtent(0, 1, 0, 0))
+        assertEquals(CoordinateMapping.Region(0, 0, 2 * pageW, pageH), vm.currentExportRegion())
+        assertNull(vm.sendBlockedHint)
+    }
+
+    @Test
+    fun scrolled_to_page_1_0_ask_exports_that_region_with_its_origin() {
+        val vm = viewModel(grid = PageExtent(0, 1, 0, 0))
+        // The viewport shows page (1,0) only (and a sliver of surround below it).
+        vm.onViewportChanged(2480.0, 0.0, 4960.0, 3600.4)
+        vm.send()
+
+        val region = CoordinateMapping.Region(pageW, 0, pageW, pageH)
+        assertEquals(region, exportedRegions.single())
+        val export = wireBody(api.submitted.single())["export"]!!.jsonObject
+        assertEquals(pageW, export["origin_x_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(0, export["origin_y_cu"]!!.jsonPrimitive.content.toInt())
+        assertEquals(1109, export["w"]!!.jsonPrimitive.content.toInt())
+        assertEquals(1568, export["h"]!!.jsonPrimitive.content.toInt())
+        // The job's region travels with its annotations.
+        assertEquals(region, vm.agentRegion)
+        assertEquals(1, vm.agentAnnotations.size)
+    }
+
+    @Test
+    fun partial_viewport_on_a_single_page_exports_just_that_part() {
+        val vm = viewModel()
+        // Zoomed in on the page's middle: a 1000.4 x 700.2 CU window, snapped outward.
+        vm.onViewportChanged(800.3, 1200.7, 1800.7, 1900.9)
+        vm.send()
+        assertEquals(CoordinateMapping.Region(800, 1200, 1001, 701), exportedRegions.single())
+    }
+
+    @Test
+    fun past_the_legibility_floor_send_is_blocked_with_the_hint() {
+        val vm = viewModel(grid = PageExtent(-1, 1, 0, 0))
+        // The whole 3-page-wide grid is visible: 7440 CU > 2 x 3508 CU.
+        vm.onViewportChanged(-3000.0, -500.0, 5500.0, 4000.0)
+        assertEquals(CanvasViewModel.ZOOM_IN_HINT, vm.sendBlockedHint)
+        assertFalse(vm.canSend)
+        vm.onSendTapped()
+        assertTrue("nothing exported or posted", exportedRegions.isEmpty() && api.submitted.isEmpty())
+        assertEquals(CanvasViewModel.ZOOM_IN_HINT, vm.sendStatus)
+
+        // Zooming back in (two of the three pages: 4960 <= 7016) re-enables Send.
+        vm.onViewportChanged(-2480.0, 0.0, 2480.0, 3508.0)
+        assertNull(vm.sendBlockedHint)
+        assertTrue(vm.canSend)
+        vm.onSendTapped()
+        assertEquals(CoordinateMapping.Region(-pageW, 0, 2 * pageW, pageH), exportedRegions.single())
+    }
+
+    @Test
+    fun a_viewport_showing_no_page_blocks_send() {
+        val vm = viewModel()
+        vm.onViewportChanged(5000.0, 0.0, 6000.0, 1000.0)
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendBlockedHint)
+        vm.send()
+        assertTrue(api.submitted.isEmpty())
+    }
+
+    @Test
+    fun a_sliver_region_is_no_region_send_is_disabled_and_nothing_crashes() {
+        val vm = viewModel()
+        // The page's right edge is 0.8 CU inside the screen's left edge: region (2479,0,1,3508)
+        // would export 0 px wide.
+        vm.onViewportChanged(2479.2, -10.0, 4000.0, 3600.0)
+        assertNull(vm.currentExportRegion())
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendBlockedHint)
+        assertFalse(vm.canSend)
+        vm.send()
+        assertTrue(exportedRegions.isEmpty() && api.submitted.isEmpty())
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendStatus)
+    }
+
+    @Test
+    fun the_sliver_threshold_is_16_export_px() {
+        val vm = viewModel()
+        vm.onViewportChanged(2446.0, -10.0, 4000.0, 3600.0) // 34 CU wide → 15 px
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendBlockedHint)
+        vm.onViewportChanged(2445.0, -10.0, 4000.0, 3600.0) // 35 CU wide → 16 px
+        assertNull(vm.sendBlockedHint)
+        vm.send()
+        assertEquals(CoordinateMapping.Region(2445, 0, 35, pageH), exportedRegions.single())
+        assertEquals(16, wireBody(api.submitted.single())["export"]!!.jsonObject["w"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun an_export_failure_is_a_send_status_not_a_crash() {
+        val vm = viewModel()
+        exportFailure = IllegalArgumentException("width and height must be > 0")
+        vm.send()
+        assertTrue("nothing posted", api.submitted.isEmpty())
+        assertEquals("Could not export the canvas: width and height must be > 0", vm.sendStatus)
+        assertFalse(vm.jobInProgress)
+        exportFailure = OutOfMemoryError("tile")
+        vm.send()
+        assertEquals("Could not export the canvas: tile", vm.sendStatus)
+        // A later send works.
+        exportFailure = null
+        vm.send()
+        assertEquals(1, api.submitted.size)
+    }
+
+    @Test
+    fun a_formalize_redraw_maps_through_the_canvas_size_the_server_returned() {
+        // The device exported the whole A4 page, but an older server sized the new canvas from
+        // the (differently sized) source: the diagram maps through the returned 1600 × 1200.
+        api = FakeDeviceApi(
+            """
+            {
+              "summary": "Redrew it.",
+              "annotations": [ { "id": "b1", "type": "rect", "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.1 } ],
+              "cards": [ { "kind": "answer", "title": "Cleaned up", "body": "Aligned.", "anchors": [], "actions": [] } ],
+              "brain_writes": [],
+              "contract_version": "agent-output/v1",
+              "canvas": { "id": "srv-fmz-1", "space_id": "space-work", "title": "T — formalized",
+                          "width_cu": 1600, "height_cu": 1200, "origin": "agent" },
+              "source_canvas_id": null
+            }
+            """.trimIndent(),
+        )
+        val vm = viewModel(cardActionsEnabled = true, formalizeEnabled = true)
+        vm.selectJobType("formalize")
+        vm.onViewportChanged(0.0, 0.0, 2480.0, 3508.0)
+        vm.onSendTapped()
+        assertEquals(CoordinateMapping.Region(0, 0, pageW, pageH), exportedRegions.single())
+        val newId = requireNotNull(vm.pendingOpenCanvasId)
+        vm.openCanvas(newId)
+        assertEquals(1, vm.agentAnnotations.size)
+        assertEquals(CoordinateMapping.Region(0, 0, 1600, 1200), vm.agentRegion)
+    }
+
+    @Test
+    fun a_later_grid_change_does_not_move_an_existing_jobs_markup() {
+        val vm = viewModel(cardActionsEnabled = true, grid = PageExtent(0, 1, 0, 0))
+        vm.onViewportChanged(2480.0, 0.0, 4960.0, 3508.0)
+        vm.onSendTapped()
+        val region = CoordinateMapping.Region(pageW, 0, pageW, pageH)
+        assertEquals(region, vm.agentRegion)
+
+        // The card anchored to the text annotation "t1" pulses at the job-region position.
+        val card = PanelCard(CardKind.ANSWER, "1 + 9 = 10", "**10**.", anchors = listOf(PanelAnchor(annotationId = "t1")))
+        vm.onCardTapped(card)
+        val before = vm.anchorPulses.single().toList()
+        assertEquals(pageW + 0.42 * pageW, before[0], 1e-9)
+        assertEquals(0.18 * pageH, before[1], 1e-9)
+        assertEquals(0.02 * pageH, before[3], 1e-9)
+
+        // The canvas grows (a stroke up-left of the grid adds a page column and a row) and
+        // the view moves on.
+        fun markupCu() = vm.agentAnnotations.map { a ->
+            val r = vm.agentRegion!!
+            com.inkwell.render.AnnotationGeometry.boundsCu(a, r.widthCu, r.heightCu, r.originX, r.originY).toList()
+        }
+        val markupBefore = markupCu()
+        assertEquals(pageW + 0.42 * pageW, markupBefore.single()[0], 1e-9)
+        vm.onStrokeCommitted(stroke(-100f to -100f, -50f to -60f))
+        assertEquals(PageExtent(-1, 1, -1, 0), vm.pageExtent)
+        vm.onViewportChanged(-2480.0, -3508.0, 4960.0, 3508.0)
+        assertEquals("the job's region is unchanged", region, vm.agentRegion)
+        assertEquals("the markup's canvas-CU placement is unchanged by growth", markupBefore, markupCu())
+        vm.onCardTapped(card)
+        assertEquals(before, vm.anchorPulses.single().toList())
     }
 
     // --- Stage 10 ---

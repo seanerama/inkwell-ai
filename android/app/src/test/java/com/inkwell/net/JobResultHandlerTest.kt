@@ -253,4 +253,39 @@ class JobResultHandlerTest {
         assertEquals(0, dao.upsertCount)
         assertNotNull(outcome.errorBody)
     }
+
+    // --- Stage 35: the job's export region travels with its result ---
+
+    @Test
+    fun done_outcome_carries_the_region_the_device_sent() = runTest {
+        val handler = JobResultHandler(LayerRepository(FakeLayerDao(), idGen = { "agent-layer" }, clock = { 1L }))
+        val region = com.inkwell.render.CoordinateMapping.Region(2480, 0, 2480, 3508)
+        val outcome = handler.handle(job("done", doneResult), canvasId = "canvas-1", region = region)
+        assertEquals(region, outcome.region)
+    }
+
+    @Test
+    fun without_a_device_region_it_is_read_from_the_stored_request_export() = runTest {
+        val handler = JobResultHandler(LayerRepository(FakeLayerDao(), idGen = { "agent-layer" }, clock = { 1L }))
+        val stored = job("done", doneResult).copy(
+            request = resultObject(
+                """{"export":{"w":1568,"h":1109,"width_cu":3508,"height_cu":2480,"origin_x_cu":-3508,"origin_y_cu":0}}""",
+            ),
+        )
+        assertEquals(
+            com.inkwell.render.CoordinateMapping.Region(-3508, 0, 3508, 2480),
+            handler.handle(stored, canvasId = "canvas-1").region,
+        )
+        // A legacy job with no export: no region (mapped as origin (0,0) over the page).
+        assertNull(handler.handle(job("done", doneResult), canvasId = "canvas-1").region)
+    }
+
+    @Test
+    fun formalize_outcome_carries_the_region_too() = runTest {
+        val region = com.inkwell.render.CoordinateMapping.Region(0, 0, 1600, 1200)
+        val handler = JobResultHandler(
+            LayerRepository(FakeLayerDao(), idGen = { "agent-layer" }, clock = { 1L }),
+        )
+        assertEquals(region, handler.handle(formalizeJob(), canvasId = "canvas-1", region = region).region)
+    }
 }
