@@ -83,3 +83,22 @@ comes from the smoke run (`smoke/android-ink.md` step 13, logcat `InkView memory
 - "Fit grid to screen" and pan clamping.
 - Per-page PDF export or print.
 - Region selection by lasso (SPEC §13 Q4).
+
+## Stage 36: fit on open (owner decision, 2026-09-27)
+
+Building stage 35 exposed a default-view gap. Canvases open at scale 1 at the origin with
+no fit (`CanvasTransform` defaults; `InkView.setTransform` has no callers), so under the
+"visible area" export rule, Ask on a freshly opened A4 note on the Idea Tab Pro sends
+about the top half of the page. The owner was offered three options:
+1. accept it;
+2. fit the grid to the screen on open;
+3. amend ADR-0014 so a partly visible single-page canvas sends the whole page.
+
+The owner chose **option 2**, planned as **stage 36 (chore, depends on 35)**:
+- fit on open and a Fit control;
+- never re-fit on growth or while writing;
+- no contract or ADR change, because the region rule stays as it is and only the default
+  view changes.
+
+**Release sequencing:** v0.0.21 (stages 32–35) should not ship to the tablet before stage 36
+merges. Otherwise the tablet would briefly have the half-page Ask.
