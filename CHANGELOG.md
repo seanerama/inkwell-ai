@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.21
+
+### Other
+- [stage 36] Fit the page grid to the screen when a canvas opens, plus a Fit button (Ask sends the whole page again by default) (#78)
+- [stage 35] Agent jobs export the visible region: origin-aware annotations and anchors, legibility floor, formalize sizing; expandable canvas on in release (#76)
+- Plan stage 36: fit the page grid to the screen on open + Fit control (owner option 2; Ask sends the whole page again by default)
+- Stage 34: expandable canvas — ghost ring, commit-time growth in any direction (8-page cap), grid never shrinks (EXPANDABLE_CANVAS off in release) (#75)
+- [stage 32] Page-grid canvas foundation: Room v5 page extent, tiled level-of-detail ink cache, visible page edges (#74)
+- Stage 33: low-latency pen and Responsive smoothing on by default; instrumented test proves wet-path prediction isolation; wet pen alpha 255 (#73)
+- ADR-0014 expandable canvas + plan stages 32 (repurposed: page-grid foundation), 34 (growth), 35 (region export); stage 33 re-pointed to 31
+- Plan stages 32 (off-page ink vanishes on pen-up: show the page, clip the live stroke) and 33 (low-latency + Responsive on by default; prove wet-path prediction isolation)
+- CHANGELOG: 0.0.20
+- Release v0.0.20: STATUS staging (stage 31 low-latency ink; release gate verified; smoke 3/3)
+
 ## 0.0.20
 
 ### Other
