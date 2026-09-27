@@ -127,4 +127,50 @@ class CanvasExportInstrumentedTest {
         bmp.recycle()
         red.recycle()
     }
+
+    /**
+     * Stage 35: a region export on a multi-page grid (the per-page clipped draw passes). On a
+     * 2 × 1 grid, a bar crossing the page edge at x = 2480 exports solid on both sides of the
+     * seam and at it (no gap, no double-drawn edge), and a region of page (1,0) alone is
+     * translated by its origin: its bar lands at `(x − 2480) × scale` and page (0,0)'s ink is
+     * not in it.
+     */
+    @Test
+    fun region_export_on_a_two_page_grid() {
+        val grid = com.inkwell.data.PageExtent(0, 1, 0, 0)
+        val cross = rect("cross", 2480f, 1000f, 600f) // x 1880..3080, across the page edge
+        val left = rect("left", 800f, 2500f, 300f) // page (0,0) only
+        val right = rect("right", 3900f, 2500f, 300f) // page (1,0) only
+        val layers = listOf(ExportLayer(z = 0, visible = true, strokes = listOf(cross, left, right)))
+
+        // Both pages: 4960 × 3508 CU → 1568 × 1109 px.
+        val both = CoordinateMapping.Region(0, 0, 2 * widthCu, heightCu)
+        val r1 = CanvasExporter.export(both, widthCu, heightCu, grid, layers)
+        assertTrue(r1 is CanvasExporter.Result.Success)
+        r1 as CanvasExporter.Result.Success
+        assertEquals(1568, r1.export.w)
+        assertEquals(1109, r1.export.h)
+        val b1 = BitmapFactory.decodeByteArray(r1.png, 0, r1.png.size)
+        val k1 = CoordinateMapping.exportScale(both.widthCu, both.heightCu)
+        val y1 = (1000f * k1).roundToInt()
+        for (x in listOf(2300f, 2479f, 2480f, 2481f, 2700f)) {
+            assertEquals("bar at x=$x", Color.BLACK, b1.getPixel((x * k1).roundToInt(), y1))
+        }
+        assertTrue(b1.getPixel((800f * k1).roundToInt(), (2500f * k1).roundToInt()) != Color.WHITE)
+        assertTrue(b1.getPixel((3900f * k1).roundToInt(), (2500f * k1).roundToInt()) != Color.WHITE)
+        b1.recycle()
+
+        // Page (1,0) alone: origin (2480, 0), one page in size → 1109 × 1568 px.
+        val page1 = CoordinateMapping.Region(widthCu, 0, widthCu, heightCu)
+        val r2 = CanvasExporter.export(page1, widthCu, heightCu, grid, layers) as CanvasExporter.Result.Success
+        assertEquals(CoordinateMapping.export(page1), r2.export)
+        assertEquals(1109, r2.export.w)
+        val b2 = BitmapFactory.decodeByteArray(r2.png, 0, r2.png.size)
+        val k2 = CoordinateMapping.exportScale(widthCu, heightCu)
+        assertTrue(b2.getPixel(((3900f - widthCu) * k2).roundToInt(), (2500f * k2).roundToInt()) != Color.WHITE)
+        assertEquals("page (0,0)'s bar is outside the region", Color.WHITE, b2.getPixel((800f * k2).roundToInt(), (2500f * k2).roundToInt()))
+        // The crossing bar's page-(1,0) half starts at the region's left edge.
+        assertEquals(Color.BLACK, b2.getPixel(2, (1000f * k2).roundToInt()))
+        b2.recycle()
+    }
 }

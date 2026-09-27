@@ -134,6 +134,9 @@ fun CanvasScreen(
                             // Stage 10: a finger tap on an agent mark scrolls the panel to
                             // its card (SPEC §4.7, canvas → card). Gated in the ViewModel.
                             onAnchorTap = { xCu, yCu -> viewModel.onCanvasTapCu(xCu, yCu) }
+                            // Stage 35: every pan/zoom reports what is on screen, so Send
+                            // exports that region and the legibility floor is re-checked.
+                            onViewportChanged = { l, t, r, b -> viewModel.onViewportChanged(l, t, r, b) }
                             this.debugEnabled = debugEnabled
                         }
                         host ?: inkView
@@ -157,7 +160,8 @@ fun CanvasScreen(
                         view.setCommittedStrokes(viewModel.strokes.toList())
                         // Agent layer (Stage 6) — rendered through AnnotationRenderer.
                         view.setAccentColor(viewModel.accentColor)
-                        view.setAgentAnnotations(viewModel.agentAnnotations)
+                        // Stage 35: drawn through the job's own export region.
+                        view.setAgentAnnotations(viewModel.agentAnnotations, viewModel.agentRegion)
                         view.setAgentLayerVisible(viewModel.agentLayerVisible)
                         // Stage 12: an agent-origin canvas (a Formalize redraw) draws opaque.
                         view.setAgentOriginCanvas(viewModel.agentOriginCanvas)
@@ -519,23 +523,28 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                     // behind BuildConfig.FORMALIZE). Extract / Action remain Phase 3+.
                     val formalize = viewModel.formalizeEnabled
                     val brain = viewModel.brainEnabled
+                    // Stage 35: past the legibility floor the picker is disabled too.
+                    val pickable = viewModel.sendBlockedHint == null
                     Text("Job type", fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         SegmentedChoice(
                             label = "Ask",
                             selected = viewModel.jobType == "ask",
                             tag = CanvasTags.INSTRUCTION_ASK,
+                            enabled = pickable,
                         ) { viewModel.selectJobType("ask") }
                         SegmentedChoice(
                             label = "Mark up",
                             selected = viewModel.jobType == "annotate",
                             tag = CanvasTags.INSTRUCTION_MARKUP,
+                            enabled = pickable,
                         ) { viewModel.selectJobType("annotate") }
                         if (formalize) {
                             SegmentedChoice(
                                 label = "Formalize",
                                 selected = viewModel.jobType == "formalize",
                                 tag = CanvasTags.INSTRUCTION_FORMALIZE,
+                                enabled = pickable,
                             ) { viewModel.selectJobType("formalize") }
                         }
                         // Stage 27: the fourth option — Remember (posts canvas.extract).
@@ -544,6 +553,7 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                                 label = "Remember",
                                 selected = viewModel.jobType == "extract",
                                 tag = CanvasTags.INSTRUCTION_REMEMBER,
+                                enabled = pickable,
                             ) { viewModel.selectJobType("extract") }
                         }
                     }
@@ -580,7 +590,7 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                 if (!cardActions && oneTap) {
                     TextButton(
                         onClick = viewModel::sendAnnotate,
-                        enabled = viewModel.online,
+                        enabled = viewModel.canSend,
                         modifier = Modifier.testTag(CanvasTags.INSTRUCTION_ANNOTATE),
                     ) { Text("Mark it up instead") }
                 } else if (!cardActions) {
@@ -592,12 +602,16 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
                 if (!viewModel.online) {
                     Text("Offline — Send is disabled until you reconnect.", color = Color(0xFFB00020))
                 }
+                // Stage 35: the inline "Zoom in to send" hint (legibility floor).
+                viewModel.sendBlockedHint?.let { hint ->
+                    Text(hint, color = Color(0xFFB00020), modifier = Modifier.testTag(CanvasTags.INSTRUCTION_BLOCKED_HINT))
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = { if (cardActions) viewModel.onSendTapped() else viewModel.send() },
-                enabled = viewModel.online,
+                enabled = viewModel.canSend,
                 modifier = Modifier.testTag(CanvasTags.INSTRUCTION_SEND),
             ) { Text(if (cardActions) viewModel.sendLabel else "Send") }
         },
@@ -609,11 +623,17 @@ private fun InstructionDialog(viewModel: CanvasViewModel) {
 
 /** A segmented-control choice (selected → filled Button, else OutlinedButton). */
 @Composable
-private fun SegmentedChoice(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+private fun SegmentedChoice(
+    label: String,
+    selected: Boolean,
+    tag: String,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     if (selected) {
-        Button(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(label) }
+        Button(onClick = onClick, enabled = enabled, modifier = Modifier.testTag(tag)) { Text(label) }
     } else {
-        OutlinedButton(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(label) }
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.testTag(tag)) { Text(label) }
     }
 }
 
@@ -773,11 +793,20 @@ private fun Toolbar(
                         Text("Note", modifier = Modifier.testTag(CanvasTags.NOTE_LABEL))
                     }
                 }
+                // Stage 35: disabled past the legibility floor, with the inline hint beside it.
                 Button(
                     onClick = viewModel::onSendTapped,
-                    enabled = viewModel.online,
+                    enabled = viewModel.canSend,
                     modifier = Modifier.testTag(CanvasTags.SEND),
                 ) { Text(viewModel.sendLabel) }
+                viewModel.sendBlockedHint?.let { hint ->
+                    Text(
+                        text = hint,
+                        color = Color(0xFFB00020),
+                        maxLines = 1,
+                        modifier = Modifier.testTag(CanvasTags.SEND_BLOCKED_HINT),
+                    )
+                }
             }
         }
 
@@ -853,6 +882,10 @@ object CanvasTags {
 
     // Stage 6 loop surfaces.
     const val SEND = "canvas_send"
+
+    // Stage 35: the inline "Zoom in to send" hint beside Send, and inside the note sheet.
+    const val SEND_BLOCKED_HINT = "canvas_send_blocked_hint"
+    const val INSTRUCTION_BLOCKED_HINT = "canvas_instruction_blocked_hint"
     const val LAYERS = "canvas_layers"
     const val SEND_PROGRESS = "canvas_send_progress"
     const val SEND_STATUS = "canvas_send_status"

@@ -16,6 +16,10 @@ import com.inkwell.contracts.Annotation
  *
  * Kept independent of the Compose/UI card types: callers adapt their cards into the
  * neutral [AnchorRegion] shape.
+ *
+ * Stage 35 (ADR-0014 §5): [widthCu] × [heightCu] and `originX`/`originY` are the **job's**
+ * export region (default origin 0 = the v1 whole-page export); both anchor kinds map
+ * through it (`cu = origin + nm × size`), never through the canvas's current bounds.
  */
 object AnchorHitTest {
 
@@ -28,19 +32,16 @@ object AnchorHitTest {
         annotationsById: Map<String, Annotation>,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): DoubleArray? {
         anchor.annotationId?.let { id ->
             val annotation = annotationsById[id] ?: return null
-            return AnnotationGeometry.boundsCu(annotation, widthCu, heightCu)
+            return AnnotationGeometry.boundsCu(annotation, widthCu, heightCu, originX, originY)
         }
         val region = anchor.region
         if (region != null && region.size == 4) {
-            return doubleArrayOf(
-                region[0] * widthCu,
-                region[1] * heightCu,
-                region[2] * widthCu,
-                region[3] * heightCu,
-            )
+            return CoordinateMapping.selectionNmToCu(region, widthCu, heightCu, originX, originY)
         }
         return null
     }
@@ -51,8 +52,10 @@ object AnchorHitTest {
         annotationsById: Map<String, Annotation>,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): List<DoubleArray> =
-        anchors.mapNotNull { rectForAnchor(it, annotationsById, widthCu, heightCu) }
+        anchors.mapNotNull { rectForAnchor(it, annotationsById, widthCu, heightCu, originX, originY) }
 
     /**
      * The index of the first card (in list order) with an anchor rect containing the CU
@@ -68,9 +71,11 @@ object AnchorHitTest {
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
         pointPaddingCu: Double = DEFAULT_POINT_PADDING_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): Int? {
         cardAnchors.forEachIndexed { index, anchors ->
-            val rects = rectsForAnchors(anchors, annotationsById, widthCu, heightCu)
+            val rects = rectsForAnchors(anchors, annotationsById, widthCu, heightCu, originX, originY)
             if (rects.any { contains(it, xCu, yCu, pointPaddingCu) }) return index
         }
         return null

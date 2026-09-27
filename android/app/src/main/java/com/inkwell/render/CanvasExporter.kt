@@ -48,9 +48,18 @@ data class ExportRaster(
  *
  * Rendering reuses [LayerRenderer] (the Stage 3 renderer) through a CU→EX scale
  * transform so the exported pixels match what the user sees on the canvas. Stage 32: the
- * renderer is tiled, but the export pins it to LOD 0 and page (0,0), so each ink layer is
- * still a full-resolution page raster downsampled into the export — byte-identical to
- * before (`CanvasExportParityInstrumentedTest`) — with one page bitmap shared by all layers.
+ * renderer is tiled, but the export pins it to LOD 0, so each ink layer is still a
+ * full-resolution raster downsampled into the export — byte-identical to before
+ * (`CanvasExportParityInstrumentedTest`) — with one tile set shared by all layers.
+ *
+ * Stage 35 (contract `coordinate-mapping` "ADR-0014 additions — region export"): the export
+ * covers a [CoordinateMapping.Region] of the canvas — the viewport ∩ the page grid. The
+ * formula above is applied to the region's size, and ink, rasters and layers are drawn
+ * translated by `−origin × scale`. A single-page canvas exported whole is the region
+ * `(0, 0, width_cu, height_cu)`, which takes exactly the pre-stage-35 path (translate 0,
+ * one page tile), so its PNG is byte-identical. On a multi-page grid the ink is drawn one
+ * grid page at a time (each pass clipped to that page's export pixels, which partition the
+ * image exactly), so only one page's LOD-0 tiles are pinned at once and the tile budget holds.
  */
 object CanvasExporter {
 
@@ -92,9 +101,30 @@ object CanvasExporter {
         heightCu: Int,
         layers: List<ExportLayer>,
         rasters: List<ExportRaster> = emptyList(),
+    ): Result = export(
+        region = CoordinateMapping.Region.page(widthCu, heightCu),
+        pageWidthCu = widthCu,
+        pageHeightCu = heightCu,
+        extent = com.inkwell.data.PageExtent.SINGLE,
+        layers = layers,
+        rasters = rasters,
+    )
+
+    /**
+     * Stage 35: export [region] of a canvas whose pages are [pageWidthCu] × [pageHeightCu]
+     * and whose grid is [extent]. The PNG is `export(region)` pixels (the formula applied to
+     * the region) and the [Result.export] carries the region's origin for the job body.
+     */
+    fun export(
+        region: CoordinateMapping.Region,
+        pageWidthCu: Int,
+        pageHeightCu: Int,
+        extent: com.inkwell.data.PageExtent,
+        layers: List<ExportLayer>,
+        rasters: List<ExportRaster> = emptyList(),
     ): Result {
-        val export = CoordinateMapping.export(widthCu, heightCu)
-        val bitmap = render(widthCu, heightCu, export, layers, rasters)
+        val export = CoordinateMapping.export(region)
+        val bitmap = render(region, pageWidthCu, pageHeightCu, extent, export, layers, rasters)
         try {
             val first = encode(bitmap)
             if (first.size <= MAX_PNG_BYTES) {
@@ -124,8 +154,10 @@ object CanvasExporter {
 
     /** Render the visible layers, ascending `z`, onto an opaque white [export]-sized bitmap. */
     private fun render(
-        widthCu: Int,
-        heightCu: Int,
+        region: CoordinateMapping.Region,
+        pageWidthCu: Int,
+        pageHeightCu: Int,
+        extent: com.inkwell.data.PageExtent,
         export: CoordinateMapping.Export,
         layers: List<ExportLayer>,
         rasters: List<ExportRaster>,
@@ -134,8 +166,12 @@ object CanvasExporter {
         val canvas = Canvas(bmp)
         canvas.drawColor(Color.WHITE) // opaque white background (contract §Export step 2)
 
-        val scale = CoordinateMapping.exportScale(widthCu, heightCu).toFloat()
-        val transform = CanvasTransform(scale = scale, tx = 0f, ty = 0f).apply {
+        val scale = CoordinateMapping.exportScale(region.widthCu, region.heightCu).toFloat()
+        // Stage 35: the region's origin lands at export pixel (0,0). Exactly 0 for the v1
+        // whole-page export, so that path is unchanged.
+        val tx = if (region.originX == 0) 0f else -region.originX * scale
+        val ty = if (region.originY == 0) 0f else -region.originY * scale
+        val transform = CanvasTransform(scale = scale, tx = tx, ty = ty).apply {
             // The export scale (~0.447 for the default canvas) is below the interactive
             // min; widen the bounds so the transform applies it verbatim.
             minScale = 0f
@@ -154,12 +190,19 @@ object CanvasExporter {
         }
         // Stage 32: ONE renderer for every ink layer, pinned to LOD 0 (1 px/CU) so each layer
         // is still rasterised at full resolution and downsampled exactly as before
-        // (byte-identical PNG, contract `coordinate-mapping`). Its single page tile is
-        // reused across layers (rebuilt per layer) instead of allocating a page-sized
-        // bitmap per layer. Export stays page (0,0) until stage 35 (region export).
+        // (byte-identical PNG, contract `coordinate-mapping`). Its tiles are reused across
+        // layers (rebuilt per layer) instead of allocating a page-sized bitmap per layer.
         val renderer = LayerRenderer().apply {
             fixedLod = 0
-            setCanvasSize(widthCu, heightCu)
+            setCanvasSize(pageWidthCu, pageHeightCu)
+            setPageExtent(extent)
+        }
+        // Stage 35: on a multi-page grid, one clipped pass per grid page in the region (see
+        // [pageChunks]); a single page draws in one unclipped pass, as before.
+        val chunks = if (extent.pageCount > 1) {
+            pageChunks(region, pageWidthCu, pageHeightCu, extent, scale, export.w, export.h)
+        } else {
+            null
         }
         try {
             for (op in ExportComposition.ordered(ops)) {
@@ -167,10 +210,19 @@ object CanvasExporter {
                     is DrawOp.Ink -> {
                         renderer.setCommittedStrokes(op.layer.strokes)
                         renderer.invalidateAll()
-                        renderer.draw(canvas, transform)
+                        if (chunks == null) {
+                            renderer.draw(canvas, transform)
+                        } else {
+                            for (clip in chunks) {
+                                canvas.save()
+                                canvas.clipRect(clip[0], clip[1], clip[2], clip[3])
+                                renderer.draw(canvas, transform)
+                                canvas.restore()
+                            }
+                        }
                     }
                     is DrawOp.Raster -> {
-                        val rect = RasterFit.destRectPx(op.raster.placement, scale, 0f, 0f)
+                        val rect = RasterFit.destRectPx(op.raster.placement, scale, tx, ty)
                         dst.set(rect.left, rect.top, rect.right, rect.bottom)
                         canvas.drawBitmap(op.raster.bitmap, null, dst, rasterPaint)
                     }
@@ -180,6 +232,40 @@ object CanvasExporter {
             renderer.release()
         }
         return bmp
+    }
+
+    /**
+     * Stage 35: the export-pixel rects of the grid pages the region shows, clipped to the
+     * image. Page edges map to pixels by one rounding rule (`round((edge − origin) × scale)`),
+     * so neighbouring rects share their boundary and the rects partition the image exactly:
+     * no pixel is drawn twice (which would double translucent ink edges) or missed.
+     * Each rect is `[left, top, right, bottom)` in export pixels. Pure, JVM-tested.
+     */
+    internal fun pageChunks(
+        region: CoordinateMapping.Region,
+        pageWidthCu: Int,
+        pageHeightCu: Int,
+        extent: com.inkwell.data.PageExtent,
+        scale: Float,
+        exportW: Int,
+        exportH: Int,
+    ): List<IntArray> {
+        fun edgeX(col: Int): Int =
+            Math.round((col.toDouble() * pageWidthCu - region.originX) * scale).toInt().coerceIn(0, exportW)
+        fun edgeY(row: Int): Int =
+            Math.round((row.toDouble() * pageHeightCu - region.originY) * scale).toInt().coerceIn(0, exportH)
+        val out = ArrayList<IntArray>()
+        for (row in extent.minRow..extent.maxRow) {
+            val top = if (row == extent.minRow) 0 else edgeY(row)
+            val bottom = if (row == extent.maxRow) exportH else edgeY(row + 1)
+            if (bottom <= top) continue
+            for (col in extent.minCol..extent.maxCol) {
+                val left = if (col == extent.minCol) 0 else edgeX(col)
+                val right = if (col == extent.maxCol) exportW else edgeX(col + 1)
+                if (right > left) out.add(intArrayOf(left, top, right, bottom))
+            }
+        }
+        return out
     }
 
     /** The two kinds of drawable, ordered by `z` via [ExportComposition] (raster below ink). */

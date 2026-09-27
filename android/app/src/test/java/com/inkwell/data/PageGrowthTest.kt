@@ -222,4 +222,29 @@ class PageGrowthTest {
         assertTrue(PageGrowth.contains(PageExtent(-2, 1, -1, 3), single))
         assertFalse(PageGrowth.contains(single, PageExtent(-1, 0, 0, 0)))
     }
+
+    // --- Stage 35 (stage-34 review follow-up): the cap check uses the true maxima ---
+
+    @Test
+    fun covers_points_does_not_falsely_report_the_cap_one_float_step_inside_a_page_edge() {
+        val a4w = 2480
+        val a4h = 3508
+        val grid = PageExtent(-1, 0, 0, 0)
+        val minX = -1234.567f
+        val maxX = Math.nextDown(2480f) // the last float inside page 0
+        val pts = FloatArray(2 * PackedPoints.STRIDE).also {
+            it[0] = minX; it[1] = 100f
+            it[PackedPoints.STRIDE] = maxX; it[PackedPoints.STRIDE + 1] = 200f
+        }
+        // The old bbox arithmetic rounds x + w up onto the page edge (column 1)...
+        assertTrue("precondition: x + w rounds to the edge", minX + (maxX - minX) >= 2480f)
+        assertFalse(PageGrowth.covers(grid, minX, 100f, maxX - minX, 100f, a4w, a4h))
+        // ...the true extremes stay inside the grid.
+        assertTrue(PageGrowth.coversPoints(grid, pts, 2, a4w, a4h))
+        assertTrue(PageGrowth.coversBounds(grid, minX, 100f, maxX, 200f, a4w, a4h))
+        // A point really past the edge is still reported.
+        pts[PackedPoints.STRIDE] = 2480f
+        assertFalse(PageGrowth.coversPoints(grid, pts, 2, a4w, a4h))
+        assertTrue("empty stroke", PageGrowth.coversPoints(grid, FloatArray(0), 0, a4w, a4h))
+    }
 }

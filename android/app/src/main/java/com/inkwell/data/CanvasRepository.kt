@@ -243,8 +243,10 @@ class CanvasRepository(
                 // lose the stroke (the insert above is in the same transaction).
                 if (grown != current && grown.isValid) updatePageExtent(canvasId, grown)
                 extent = grown
-                capped = !PageGrowth.covers(
-                    grown, entity.bboxX, entity.bboxY, entity.bboxW, entity.bboxH, canvas.widthCu, canvas.heightCu,
+                // Against the points' true extremes (not bbox_x + bbox_w in float), so a stroke
+                // ending just inside a page edge never falsely reports the 8-page limit.
+                capped = !PageGrowth.coversPoints(
+                    grown, commit.stroke.points, commit.stroke.pointCount, canvas.widthCu, canvas.heightCu,
                 )
             }
         }

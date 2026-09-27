@@ -245,4 +245,33 @@ class AnnotationRenderInstrumentedTest {
         assertEquals(1568, result.export.h)
         assertEquals(widthCu, result.export.widthCu)
     }
+
+    /**
+     * Stage 35: a job's markup is drawn through ITS export region — a highlight at
+     * `origin + points × region size`, and the margin-note gutter at the region's right edge
+     * (not the page's). Rendered at 1/4 scale so the grid fits a small bitmap.
+     */
+    @Test
+    fun markup_is_drawn_through_its_job_region() {
+        val region = CoordinateMapping.Region(originX = 1000, originY = 400, widthCu = 2000, heightCu = 1600)
+        val s = 0.25f
+        val bmp = Bitmap.createBitmap(((region.originX + region.widthCu) * s + 200).toInt(), ((region.originY + region.heightCu) * s + 50).toInt(), Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.drawColor(Color.WHITE)
+        val highlight = Highlight(id = "h", points = listOf(listOf(0.4, 0.4), listOf(0.6, 0.4), listOf(0.6, 0.6), listOf(0.4, 0.6)))
+        val note = MarginNote(id = "m", y = 0.5, text = "note")
+        AnnotationRenderer(AnnotationRenderer.DEFAULT_ACCENT, region, fullVocabulary = true)
+            .draw(canvas, CanvasTransform(scale = s, tx = 0f, ty = 0f), listOf(highlight, note))
+
+        // Highlight centre: (1000 + 0.5 × 2000, 400 + 0.5 × 1600) = (2000, 1200) CU.
+        assertTrue(bmp.getPixel((2000 * s).toInt(), (1200 * s).toInt()) != Color.WHITE)
+        // Where the page-sized, origin-0 mapping would have put it: (1240, 1754) CU — white.
+        assertEquals(Color.WHITE, bmp.getPixel((1240 * s).toInt(), (1754 * s).toInt()))
+        // The gutter tint starts at the region's right edge (3000 CU), not the page's (2480).
+        val gutterY = (region.originY + 50) * s
+        assertTrue("gutter just right of the region", bmp.getPixel((3010 * s).toInt(), gutterY.toInt()) != Color.WHITE)
+        assertEquals("no gutter left of the region edge", Color.WHITE, bmp.getPixel((2990 * s).toInt(), gutterY.toInt()))
+        assertEquals("no gutter above the region", Color.WHITE, bmp.getPixel((3010 * s).toInt(), ((region.originY - 20) * s).toInt()))
+        bmp.recycle()
+    }
 }

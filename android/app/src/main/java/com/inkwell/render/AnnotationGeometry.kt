@@ -23,6 +23,12 @@ import kotlin.math.hypot
  * they unit-test on the JVM. The `FULL_VOCABULARY` kill-switch is deliberately NOT
  * modelled here: the flag lives in [AnnotationRenderer]; this object only exposes which
  * wire `type`s each mode draws natively so tests can count fallbacks without Android.
+ *
+ * Stage 35 (ADR-0014 §5): every mapping takes the job's export region — [widthCu] ×
+ * [heightCu] is the **region** size and `originX`/`originY` (default 0, the v1 whole-page
+ * export) its top-left corner in canvas CU — so `cu = origin + nm × size`. A `margin_note`
+ * sits at the region's right edge. Callers pass the region recorded with the job, never
+ * the canvas's current bounds.
  */
 object AnnotationGeometry {
 
@@ -71,9 +77,11 @@ object AnnotationGeometry {
         text: Text,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): TextPlacement = TextPlacement(
-        xCu = CoordinateMapping.nmToCuX(text.at[0], widthCu),
-        yCu = CoordinateMapping.nmToCuY(text.at[1], heightCu),
+        xCu = CoordinateMapping.nmToCuX(text.at[0], widthCu, originX),
+        yCu = CoordinateMapping.nmToCuY(text.at[1], heightCu, originY),
         sizeCu = CoordinateMapping.sizeToCu(text.size, heightCu),
     )
 
@@ -82,8 +90,10 @@ object AnnotationGeometry {
         points: List<List<Double>>,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): List<Pair<Double, Double>> = points.map { p ->
-        CoordinateMapping.nmToCuX(p[0], widthCu) to CoordinateMapping.nmToCuY(p[1], heightCu)
+        CoordinateMapping.nmToCuX(p[0], widthCu, originX) to CoordinateMapping.nmToCuY(p[1], heightCu, originY)
     }
 
     /**
@@ -92,43 +102,51 @@ object AnnotationGeometry {
      * natively ("render an unknown annotation type as a labelled rect around its bounding
      * box", contract `agent-output` §Versioning). Point-based types are exactly
      * `points × canvas size`; `text` is a zero-width box of the text height at `at`;
-     * `margin_note` is a point on the right edge at `y` (its gutter lies outside the
-     * canvas bounds).
+     * `margin_note` is a point on the region's right edge at `y` (its gutter lies outside
+     * the region).
      */
     fun boundsCu(
         annotation: Annotation,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): DoubleArray = when (annotation) {
-        is Highlight -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu)
-        is Underline -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu)
-        is Strikethrough -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu)
-        is Path -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu)
-        is Arrow -> CoordinateMapping.nmPointsBoundsCu(listOf(annotation.from, annotation.to), widthCu, heightCu)
+        is Highlight -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu, originX, originY)
+        is Underline -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu, originX, originY)
+        is Strikethrough -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu, originX, originY)
+        is Path -> CoordinateMapping.nmPointsBoundsCu(annotation.points, widthCu, heightCu, originX, originY)
+        is Arrow -> CoordinateMapping.nmPointsBoundsCu(
+            listOf(annotation.from, annotation.to), widthCu, heightCu, originX, originY,
+        )
         is Ellipse -> {
-            val cx = CoordinateMapping.nmToCuX(annotation.center[0], widthCu)
-            val cy = CoordinateMapping.nmToCuY(annotation.center[1], heightCu)
+            val cx = CoordinateMapping.nmToCuX(annotation.center[0], widthCu, originX)
+            val cy = CoordinateMapping.nmToCuY(annotation.center[1], heightCu, originY)
             val rx = annotation.rx * widthCu
             val ry = annotation.ry * heightCu
             doubleArrayOf(cx - rx, cy - ry, 2 * rx, 2 * ry)
         }
         is RectAnnotation -> doubleArrayOf(
-            annotation.x * widthCu,
-            annotation.y * heightCu,
+            CoordinateMapping.nmToCuX(annotation.x, widthCu, originX),
+            CoordinateMapping.nmToCuY(annotation.y, heightCu, originY),
             annotation.w * widthCu,
             annotation.h * heightCu,
         )
         is Text -> {
-            val p = textPlacement(annotation, widthCu, heightCu)
+            val p = textPlacement(annotation, widthCu, heightCu, originX, originY)
             doubleArrayOf(p.xCu, p.yCu, 0.0, p.sizeCu)
         }
         is MarginNote -> doubleArrayOf(
-            widthCu.toDouble(),
-            CoordinateMapping.nmToCuY(annotation.y, heightCu),
+            marginGutterLeftCu(widthCu, originX),
+            CoordinateMapping.nmToCuY(annotation.y, heightCu, originY),
             0.0,
             0.0,
         )
     }
+
+    /** Stage 35: the margin-note gutter's left edge — the job region's right edge, in CU. */
+    fun marginGutterLeftCu(widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU, originX: Int = 0): Double =
+        originX.toDouble() + widthCu
 
     /**
      * The CU vertices of an arrow's filled triangular head, tip at `to`. The head extends
@@ -142,11 +160,13 @@ object AnnotationGeometry {
         headLenCu: Double = ARROW_HEAD_LENGTH_CU,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): ArrowHead {
-        val tipX = CoordinateMapping.nmToCuX(to[0], widthCu)
-        val tipY = CoordinateMapping.nmToCuY(to[1], heightCu)
-        val fromX = CoordinateMapping.nmToCuX(from[0], widthCu)
-        val fromY = CoordinateMapping.nmToCuY(from[1], heightCu)
+        val tipX = CoordinateMapping.nmToCuX(to[0], widthCu, originX)
+        val tipY = CoordinateMapping.nmToCuY(to[1], heightCu, originY)
+        val fromX = CoordinateMapping.nmToCuX(from[0], widthCu, originX)
+        val fromY = CoordinateMapping.nmToCuY(from[1], heightCu, originY)
         val dx = tipX - fromX
         val dy = tipY - fromY
         val len = hypot(dx, dy)
@@ -178,11 +198,13 @@ object AnnotationGeometry {
         offsetCu: Double = ARROW_LABEL_OFFSET_CU,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): Pair<Double, Double> {
-        val fromX = CoordinateMapping.nmToCuX(from[0], widthCu)
-        val fromY = CoordinateMapping.nmToCuY(from[1], heightCu)
-        val toX = CoordinateMapping.nmToCuX(to[0], widthCu)
-        val toY = CoordinateMapping.nmToCuY(to[1], heightCu)
+        val fromX = CoordinateMapping.nmToCuX(from[0], widthCu, originX)
+        val fromY = CoordinateMapping.nmToCuY(from[1], heightCu, originY)
+        val toX = CoordinateMapping.nmToCuX(to[0], widthCu, originX)
+        val toY = CoordinateMapping.nmToCuY(to[1], heightCu, originY)
         val midX = (fromX + toX) / 2.0
         val midY = (fromY + toY) / 2.0
         val dx = toX - fromX
@@ -203,8 +225,10 @@ object AnnotationGeometry {
         rect: RectAnnotation,
         widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originX: Int = 0,
+        originY: Int = 0,
     ): Pair<Double, Double> =
-        CoordinateMapping.nmToCuX(rect.x, widthCu) to CoordinateMapping.nmToCuY(rect.y, heightCu)
+        CoordinateMapping.nmToCuX(rect.x, widthCu, originX) to CoordinateMapping.nmToCuY(rect.y, heightCu, originY)
 
     /** The right gutter width in CU (`[MARGIN_GUTTER_FRACTION] × width_cu`). View-only. */
     fun marginGutterWidthCu(widthCu: Int = CoordinateMapping.DEFAULT_WIDTH_CU): Double =
@@ -224,12 +248,13 @@ object AnnotationGeometry {
         ysNm: List<Double>,
         lineHeightCu: Double,
         heightCu: Int = CoordinateMapping.DEFAULT_HEIGHT_CU,
+        originY: Int = 0,
     ): List<Double> {
         val order = ysNm.indices.sortedBy { ysNm[it] }
         val placed = DoubleArray(ysNm.size)
         var lastTop = Double.NEGATIVE_INFINITY
         for (idx in order) {
-            val desired = CoordinateMapping.nmToCuY(ysNm[idx], heightCu)
+            val desired = CoordinateMapping.nmToCuY(ysNm[idx], heightCu, originY)
             val top = maxOf(desired, lastTop + lineHeightCu)
             placed[idx] = top
             lastTop = top

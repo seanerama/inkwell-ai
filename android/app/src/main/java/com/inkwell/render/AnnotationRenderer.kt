@@ -45,6 +45,15 @@ import com.inkwell.contracts.Path as PathAnnotation
  * The renderer is opacity-authoritative: it paints the 70% itself, so the owning
  * agent [com.inkwell.data.LayerEntity] is created at full (1.0) opacity to avoid
  * compounding the transparency.
+ *
+ * Stage 35 (ADR-0014 §5, contract `coordinate-mapping` "Mapping back (device),
+ * origin-aware"): [widthCu] × [heightCu] and [originX]/[originY] are the **job's** export
+ * region, never the canvas's current bounds. The renderer draws in that region's local CU
+ * (`origin + nm × size` is applied as one translate by the origin), so everything sized or
+ * clamped against `widthCu`/`heightCu` — the text wrap, the margin-note gutter at the
+ * region's right edge, the note stacking and the label clamps — follows the job's region,
+ * and later growth of the canvas never moves the markup. Origin (0,0) with the page size is
+ * the v1 behaviour exactly (no translate is applied).
  */
 class AnnotationRenderer(
     /** The space accent color (ARGB int), used when an annotation has no `color`. */
@@ -66,7 +75,21 @@ class AnnotationRenderer(
      * OFF, the default) stays for agent layers on user canvases.
      */
     private val agentOriginCanvas: Boolean = false,
+    /** Stage 35: the job region's top-left corner in canvas CU (0 = the v1 whole-page export). */
+    private val originX: Int = 0,
+    private val originY: Int = 0,
 ) {
+
+    /** Stage 35: a renderer for the markup of a job that exported [region]. */
+    constructor(
+        accentColor: Int,
+        region: CoordinateMapping.Region,
+        fullVocabulary: Boolean = BuildConfig.FULL_VOCABULARY,
+        agentOriginCanvas: Boolean = false,
+    ) : this(
+        accentColor, region.widthCu, region.heightCu, fullVocabulary, agentOriginCanvas,
+        region.originX, region.originY,
+    )
 
     /** Mark opacity: opaque on an agent-origin canvas, else the 70% agent alpha (§6.3). */
     private val fillAlpha: Int = if (agentOriginCanvas) OPAQUE_ALPHA else FILL_ALPHA
@@ -154,6 +177,8 @@ class AnnotationRenderer(
         }
         outCanvas.save()
         outCanvas.concat(matrix)
+        // Stage 35: into the job region's local CU (a no-op for the v1 origin (0,0)).
+        if (originX != 0 || originY != 0) outCanvas.translate(originX.toFloat(), originY.toFloat())
         val marginNotes = mutableListOf<MarginNote>()
         for (a in annotations) {
             when (a) {
@@ -437,7 +462,7 @@ class AnnotationRenderer(
         } else {
             top + FALLBACK_LABEL_GAP_CU - fm.ascent
         }
-        // Keep the label on-canvas for the right-edge margin_note box.
+        // Keep the label inside the job's region for the right-edge margin_note box.
         val labelX = left.coerceAtMost(widthCu - textPaint.measureText(AnnotationGeometry.fallbackLabel(annotation)))
             .coerceAtLeast(0f)
         canvas.drawText(AnnotationGeometry.fallbackLabel(annotation), labelX, labelBaseline, textPaint)

@@ -49,6 +49,29 @@ _FAILURE_BODIES = {
 _DEFAULT_WIDTH_CU = 2480
 _DEFAULT_HEIGHT_CU = 3508
 
+# The largest size the ``canvases.width_cu`` / ``height_cu`` INTEGER columns can hold.
+_MAX_CU = 2**31 - 1
+
+
+def _region_size(request: dict) -> tuple[int, int] | None:
+    """The exported region's ``(width_cu, height_cu)`` from ``request["export"]``, or None.
+
+    Stage 35 (ADR-0014 §6, contract device-api "ADR-0014 additions"): an agent job exports
+    a **region** of the canvas and ``export.width_cu/height_cu`` are its size. ``export``
+    stays an opaque dict everywhere else, so it is read defensively here: both values must
+    be positive integers (not bools, not floats, not strings) that fit the column, or the
+    region is ignored and the caller falls back.
+    """
+    export = request.get("export")
+    if not isinstance(export, dict):
+        return None
+    width = export.get("width_cu")
+    height = export.get("height_cu")
+    for value in (width, height):
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= _MAX_CU:
+            return None
+    return width, height
+
 
 def _daily_count(ctx: JobContext) -> int:
     """to_agent jobs for this space since the start of the current UTC day, minus self."""
@@ -86,11 +109,19 @@ def _formalize_canvas(ctx: JobContext, result: dict) -> None:
     created ``canvas`` and the ``source_canvas_id``. Neither is produced by the model
     (contract agent-output, same precedent as ``contract_version``). The row is added to
     ``ctx.session`` and flushed for its id; the queue commits it atomically with the job.
+
+    Stage 35 (contract device-api "ADR-0014 additions"): the new canvas is sized from the
+    exported region (``export.width_cu × export.height_cu``) so the formalized geometry maps
+    1:1 onto it at origin (0,0); without a usable region it falls back to the source canvas,
+    then to A4 (2480 × 3508).
     """
     job = ctx.job
     width_cu = _DEFAULT_WIDTH_CU
     height_cu = _DEFAULT_HEIGHT_CU
-    if job.canvas_id is not None:
+    region = _region_size(job.request or {})
+    if region is not None:
+        width_cu, height_cu = region
+    elif job.canvas_id is not None:
         source = ctx.session.get(Canvas, job.canvas_id)
         if source is not None:
             width_cu = source.width_cu

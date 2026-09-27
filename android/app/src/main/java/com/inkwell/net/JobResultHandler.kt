@@ -50,6 +50,15 @@ data class LoopOutcome(
      * redraw canvas for `canvas.formalize`, null otherwise (stay on the current canvas).
      */
     val openCanvasId: String? = null,
+    /**
+     * Stage 35 (ADR-0014 §5): the region of the source canvas this job exported — the
+     * space its normalized geometry maps back through (contract `coordinate-mapping`,
+     * "Mapping back (device), origin-aware"). Travels with the result so the annotations,
+     * anchors and margin notes stay where they were put even if the canvas grows later.
+     * Null when neither the request nor the job recorded a usable export (a legacy job):
+     * the UI then maps it as origin (0,0) over the page.
+     */
+    val region: com.inkwell.render.CoordinateMapping.Region? = null,
 ) {
     /** Card titles only (the Stage-6 surface), derived from [cards]. */
     val cardTitles: List<String> get() = cards.map { it.title }
@@ -81,10 +90,25 @@ class JobResultHandler(
     private val formalizedCanvasStore: FormalizedCanvasStore? = null,
 ) {
 
-    suspend fun handle(job: Job, canvasId: String): LoopOutcome =
-        if (job.status == "done") handleDone(job, canvasId) else handleFailed(job)
+    /**
+     * [region] is the export region the device sent with the job (stage 35). When null it is
+     * read back from the job's stored `request.export` (the server returns it unchanged), and
+     * stays null for a legacy job with no export sizes.
+     */
+    suspend fun handle(
+        job: Job,
+        canvasId: String,
+        region: com.inkwell.render.CoordinateMapping.Region? = null,
+    ): LoopOutcome {
+        val jobRegion = region ?: JobRequestBuilder.regionOf(job.request["export"] as? JsonObject)
+        return if (job.status == "done") handleDone(job, canvasId, jobRegion) else handleFailed(job)
+    }
 
-    private suspend fun handleDone(job: Job, canvasId: String): LoopOutcome {
+    private suspend fun handleDone(
+        job: Job,
+        canvasId: String,
+        region: com.inkwell.render.CoordinateMapping.Region?,
+    ): LoopOutcome {
         val output = parseResult(job)
 
         // Stage 12: a `canvas.formalize` result carries the server-added `canvas` sibling
@@ -114,6 +138,7 @@ class JobResultHandler(
                 serverCards = job.cards,
                 newCanvasId = formalized.id,
                 openCanvasId = formalized.id,
+                region = region,
             )
         }
 
@@ -129,6 +154,7 @@ class JobResultHandler(
             errorBody = null,
             isError = false,
             serverCards = job.cards,
+            region = region,
         )
     }
 

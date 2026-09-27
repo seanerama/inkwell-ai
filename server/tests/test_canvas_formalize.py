@@ -229,3 +229,85 @@ def test_ask_canary_result_has_no_canvas_sibling_keys(client, auth, agent_on, db
     # And no agent canvas row was created by the ask job.
     assert db.execute(select(Job).where(Job.id == job_id)).scalar_one().type == "canvas.ask"
     assert db.execute(select(Canvas).where(Canvas.origin == "agent")).scalars().all() == []
+
+
+# --- Stage 35 (ADR-0014 §6): the new canvas is sized from the exported region ---
+
+
+def _formalized_dims(client, auth, db, **extra) -> tuple[int, int]:
+    space = _default_space(db)
+    source = _source_canvas(db, space)
+    agent_client.set_client(FakeAnthropic(json_payload(FORMALIZE_RESPONSE)))
+    job_id = _submit(client, auth, space_id=str(space.id), canvas_id=str(source.id), **extra)
+    _run_worker()
+    got = client.get(f"/v1/jobs/{job_id}", headers=auth).json()
+    assert got["status"] == "done"
+    new_id = got["result"]["canvas"]["id"]
+    row = db.execute(select(Canvas).where(Canvas.origin == "agent")).scalars().one()
+    assert str(row.id) == new_id
+    assert (got["result"]["canvas"]["width_cu"], got["result"]["canvas"]["height_cu"]) == (
+        row.width_cu,
+        row.height_cu,
+    )
+    return row.width_cu, row.height_cu
+
+
+def test_formalize_sizes_new_canvas_from_the_export_region(client, auth, agent_on, db):
+    # A landscape region one page right of the origin (the device-api example): the new
+    # canvas is the region's size, not the 1600x1200 source canvas.
+    export = {
+        "w": 1568,
+        "h": 1109,
+        "width_cu": 3508,
+        "height_cu": 2480,
+        "origin_x_cu": 2480,
+        "origin_y_cu": 0,
+    }
+    assert _formalized_dims(client, auth, db, export=export) == (3508, 2480)
+    # The export is stored as given (opaque), origin keys included.
+    job = db.execute(select(Job).where(Job.type == "canvas.formalize")).scalars().one()
+    assert job.request["export"] == export
+
+
+def test_formalize_region_without_origin_keys_still_sizes_from_the_region(
+    client, auth, agent_on, db
+):
+    export = {"w": 1568, "h": 1176, "width_cu": 2000, "height_cu": 1500}
+    assert _formalized_dims(client, auth, db, export=export) == (2000, 1500)
+
+
+def test_formalize_without_export_sizes_keeps_the_source_canvas_size(client, auth, agent_on, db):
+    # No export at all, and an export without sizes: unchanged (the source canvas size).
+    assert _formalized_dims(client, auth, db) == (1600, 1200)
+
+
+@pytest.mark.parametrize(
+    "export",
+    [
+        {"w": 1568, "h": 1109},
+        {"width_cu": 0, "height_cu": 2480},
+        {"width_cu": -5, "height_cu": 2480},
+        {"width_cu": 3508.5, "height_cu": 2480},
+        {"width_cu": "3508", "height_cu": 2480},
+        {"width_cu": True, "height_cu": 2480},
+        {"width_cu": 3508, "height_cu": None},
+        {"width_cu": 3508, "height_cu": 2**31},
+    ],
+)
+def test_formalize_ignores_a_garbage_region_and_falls_back(client, auth, agent_on, db, export):
+    assert _formalized_dims(client, auth, db, export=export) == (1600, 1200)
+
+
+def test_formalize_region_without_source_canvas_sizes_from_region(client, auth, agent_on, db):
+    space = _default_space(db)
+    agent_client.set_client(FakeAnthropic(json_payload(FORMALIZE_RESPONSE)))
+    job_id = _submit(
+        client,
+        auth,
+        space_id=str(space.id),
+        export={"w": 1568, "h": 1109, "width_cu": 3508, "height_cu": 2480},
+    )
+    _run_worker()
+    got = client.get(f"/v1/jobs/{job_id}", headers=auth).json()
+    assert got["result"]["canvas"]["width_cu"] == 3508
+    assert got["result"]["canvas"]["height_cu"] == 2480

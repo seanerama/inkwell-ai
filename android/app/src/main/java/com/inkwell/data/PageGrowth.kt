@@ -95,12 +95,58 @@ object PageGrowth {
      * clipped at the grid edge).
      */
     fun covers(extent: PageExtent, x: Float, y: Float, w: Float, h: Float, pageW: Int, pageH: Int): Boolean {
-        if (pageW <= 0 || pageH <= 0) return true
         if (!x.isFinite() || !y.isFinite() || !w.isFinite() || !h.isFinite()) return true
-        return PageExtent.pageIndex(x.toDouble(), pageW) >= extent.minCol &&
-            PageExtent.pageIndex((x + w).toDouble(), pageW) <= extent.maxCol &&
-            PageExtent.pageIndex(y.toDouble(), pageH) >= extent.minRow &&
-            PageExtent.pageIndex((y + h).toDouble(), pageH) <= extent.maxRow
+        return coversBounds(extent, x, y, x + w, y + h, pageW, pageH)
+    }
+
+    /**
+     * True when [extent] covers every page the closed point bbox `[minX, maxX] × [minY, maxY]`
+     * touches. Takes the true maxima, so no `x + w` float step can land a point that sits just
+     * inside a page edge on the next page.
+     */
+    fun coversBounds(
+        extent: PageExtent,
+        minX: Float,
+        minY: Float,
+        maxX: Float,
+        maxY: Float,
+        pageW: Int,
+        pageH: Int,
+    ): Boolean {
+        if (pageW <= 0 || pageH <= 0) return true
+        if (!minX.isFinite() || !minY.isFinite() || !maxX.isFinite() || !maxY.isFinite()) return true
+        return PageExtent.pageIndex(minX.toDouble(), pageW) >= extent.minCol &&
+            PageExtent.pageIndex(maxX.toDouble(), pageW) <= extent.maxCol &&
+            PageExtent.pageIndex(minY.toDouble(), pageH) >= extent.minRow &&
+            PageExtent.pageIndex(maxY.toDouble(), pageH) <= extent.maxRow
+    }
+
+    /**
+     * Stage 35 (stage-34 review follow-up): [coversBounds] of the first [count] stride-5
+     * [points]' own min/max — the cap check the repository runs after a stroke commits. It
+     * compares against the real extreme coordinates, never a recomputed `bbox_x + bbox_w`, so
+     * a stroke that ends within one float step of a page edge does not falsely report the
+     * 8-page limit. True for an empty stroke.
+     */
+    fun coversPoints(extent: PageExtent, points: FloatArray, count: Int, pageW: Int, pageH: Int): Boolean {
+        val stride = PackedPoints.STRIDE
+        val n = minOf(count, points.size / stride)
+        if (n <= 0) return true
+        var minX = Float.POSITIVE_INFINITY
+        var minY = Float.POSITIVE_INFINITY
+        var maxX = Float.NEGATIVE_INFINITY
+        var maxY = Float.NEGATIVE_INFINITY
+        for (i in 0 until n) {
+            val x = points[i * stride]
+            val y = points[i * stride + 1]
+            if (!x.isFinite() || !y.isFinite()) continue
+            if (x < minX) minX = x
+            if (x > maxX) maxX = x
+            if (y < minY) minY = y
+            if (y > maxY) maxY = y
+        }
+        if (minX > maxX || minY > maxY) return true
+        return coversBounds(extent, minX, minY, maxX, maxY, pageW, pageH)
     }
 
     /** The grid union of [a] and [b] (the smallest rectangle containing both). */

@@ -36,6 +36,7 @@ class LoopController(
         val queued = deviceRepository.submitAgentJob(request)
         onQueued(queued)
         val terminal = deviceRepository.pollUntilTerminal(queued.id, startCursor)
-        return jobResultHandler.handle(terminal, canvasId)
+        // Stage 35: the region this request exported travels with the result.
+        return jobResultHandler.handle(terminal, canvasId, JobRequestBuilder.regionOf(request.export))
     }
 }

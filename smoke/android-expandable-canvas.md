@@ -1,16 +1,19 @@
-# UI-smoke: Android expandable canvas (stage 34, ADR-0014 §2)
+# UI-smoke: Android expandable canvas (stages 34–35, ADR-0014 §2, §4–§6)
 
 Manual "observably-works" check for the **Operator**, run on the real tablet (Lenovo Idea
 Tab Pro, Android 14) with the active stylus. It covers the ghost ring, writing into it to
-add pages in any direction, the 8-page cap, and the grid surviving a reopen. Browser smoke
-does not apply to a native client (ADR-0001), so this human pass is the replacement.
+add pages in any direction, the 8-page cap, the grid surviving a reopen and (stage 35)
+agent jobs that send **what is on screen**: Ask about writing on page 2, the "Zoom in to
+send" floor, and Formalize from a region. Browser smoke does not apply to a native client
+(ADR-0001), so this human pass is the replacement.
 
 ## Preconditions
 
-- A **debug** APK is installed (`assembleDebug`, or a debug build from the Release page).
-  The feature is behind `BuildConfig.EXPANDABLE_CANVAS`: **ON in debug, OFF in release**
-  until stage 35 (region export) turns it on. On a release APK there is no ring and the
-  canvas is the fixed page — that is the expected OFF behaviour, not a failure of this smoke.
+- The **release** APK is installed (the signed APK from the Release page). Since stage 35
+  `BuildConfig.EXPANDABLE_CANVAS` is **ON in debug and in release** (documented exception);
+  flipping it to `false` is the kill switch (see the last section).
+- The device is paired with **staging** (Settings → server URL + token) and the server has
+  `AGENT_ENABLED` on, so Ask / Mark up / Formalize return results (section 7).
 - The Library is on (default): you can create a new canvas from the Library.
 - Settings → Ink → **Low-latency pen** is noted; the whole smoke runs twice, once with it
   **on** (the default) and once **off** (see the last section).
@@ -98,9 +101,70 @@ does not apply to a native client (ADR-0001), so this human pass is the replacem
     - [ ] low-latency ON: __________
     - [ ] low-latency OFF: __________
 
-## Release APK (switch OFF)
+## 7. Agent jobs send the visible region (stage 35)
 
-14. On a **release** APK open any canvas.
+14. Create a new canvas. On page 1 write **"2 + 2 ="**. Write into the **right** ghost page
+    so the grid is two pages wide, and on that second page write a different question,
+    e.g. **"capital of France?"**.
+15. Pan and zoom so **only the second page** fills the screen (page 1 off screen). Tap
+    **Send** (Ask).
+    - *Expected:* the answer is about **the second page's question** (Paris), not "2 + 2";
+      the agent's markup (a highlight, or the answer text) lands **on the second page's
+      writing**, not on page 1 and not offset by a page.
+    - *Expected screenshot D:* the second page with the agent markup on its writing.
+16. Now write into the **left** ghost ring of page 1 so the grid grows left (three pages
+    wide). Pan back to the second page.
+    - *Expected:* the markup from step 15 has **not moved** — it is still on the writing.
+17. Tap the answer card.
+    - *Expected:* the pulse lights up the marked writing on the second page (the anchor
+      follows the job's region).
+
+    Operator result (fill in):
+    - [ ] Ask about page 2 answers about page 2: __________
+    - [ ] markup lands on page 2's writing: __________
+    - [ ] markup unchanged after growing left: __________
+
+## 8. Too far out: "Zoom in to send"
+
+18. Pinch out until all three pages are on screen side by side.
+    - *Expected:* **Send is greyed out** and a red **"Zoom in to send"** hint shows beside
+      it; the Note sheet's job-type choices and its Send are disabled too, with the same
+      hint.
+19. Zoom back in until at most two pages are on screen.
+    - *Expected:* Send is enabled again and the hint disappears.
+20. Pan so no page is on screen at all (only the surround).
+    - *Expected:* Send is disabled with **"Scroll to a page to send"**.
+
+    Operator result (fill in):
+    - [ ] Send disabled + "Zoom in to send" when zoomed far out: __________
+    - [ ] re-enabled after zooming in: __________
+
+## 9. Formalize from a region
+
+21. Draw a small box-and-arrow sketch on the **second page**. With only the second page on
+    screen, open the Note sheet, pick **Formalize** and send.
+    - *Expected:* a new canvas "<title> — formalized" opens; the clean diagram matches the
+      sketch's layout and fills the new canvas the same way the sketch filled the screen
+      region (the new canvas is the size of the exported region, not stretched or shifted).
+    - *Expected screenshot E:* the formalized canvas beside the sketch.
+
+    Operator result (fill in):
+    - [ ] formalized canvas matches the region: __________
+
+## 10. Server
+
+22. After the server deploy, run the deploy canary (`inkwell canary` on the staging host,
+    as in the release runbook).
+    - *Expected:* the canary passes (it sends a single-page export with no origin, which
+      is valid unchanged).
+
+    Operator result (fill in):
+    - [ ] canary passes: __________
+
+## Kill switch (EXPANDABLE_CANVAS = false)
+
+23. On a build with `EXPANDABLE_CANVAS` flipped to `false`, open any canvas.
     - *Expected:* no ghost ring; a stroke started outside the page does not start; a
       stroke written from the page across its edge is cut off at the edge while you write
-      and after pen-up (the fixed page, as before stage 34).
+      and after pen-up (the fixed page, as before stage 34). Ask still sends what is on
+      screen, clipped to the page.

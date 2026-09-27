@@ -130,6 +130,17 @@ class InkView @JvmOverloads constructor(
      */
     var onAnchorTap: ((Float, Float) -> Unit)? = null
 
+    /**
+     * Stage 35 (ADR-0014 §4): the canvas-unit rect `[left, top, right, bottom)` this view
+     * shows, reported whenever pan/zoom or the view size changes (and once when set), so the
+     * view model can export exactly what is on screen and apply the legibility floor.
+     */
+    var onViewportChanged: ((Double, Double, Double, Double) -> Unit)? = null
+        set(value) {
+            field = value
+            reportViewport()
+        }
+
     private val renderer = LayerRenderer()
     // Stage 32: the page grid (paper, edges, surround) beneath raster and ink.
     private val pagePainter = com.inkwell.render.PageGridPainter()
@@ -154,6 +165,9 @@ class InkView @JvmOverloads constructor(
     // Rendered through AnnotationRenderer (opacity-authoritative: it paints the 70%), so
     // the agent LayerEntity stays at 1.0 opacity and the transparency is never doubled.
     private var agentAnnotations: List<Annotation> = emptyList()
+    // Stage 35: the export region of the job the annotations came from; they are drawn
+    // through it, never through the grid's current bounds. Null = origin (0,0) over the page.
+    private var agentRegion: com.inkwell.render.CoordinateMapping.Region? = null
     private var agentLayerVisible: Boolean = true
     // Stage 12: when the open canvas is an agent redraw (origin=agent), its agent layer is
     // the content, so it renders opaque/ink-black rather than 70%/accent (SPEC §6.3).
@@ -290,8 +304,12 @@ class InkView @JvmOverloads constructor(
      * [AnnotationRenderer] whenever the agent layer is visible — in both debug and
      * release (unlike [setDebugHighlights], which is the debug-only fixture preview).
      */
-    fun setAgentAnnotations(annotations: List<Annotation>) {
+    fun setAgentAnnotations(
+        annotations: List<Annotation>,
+        region: com.inkwell.render.CoordinateMapping.Region? = null,
+    ) {
         agentAnnotations = annotations
+        agentRegion = region
         invalidate()
     }
 
@@ -352,7 +370,26 @@ class InkView @JvmOverloads constructor(
         transform.tx = tx
         transform.ty = ty
         onTransformChanged()
+        reportViewport()
         invalidate()
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        reportViewport()
+    }
+
+    /** Stage 35: report the visible canvas-unit rect (nothing until the view has a size). */
+    private fun reportViewport() {
+        val cb = onViewportChanged ?: return
+        if (width <= 0 || height <= 0 || !(transform.scale > 0f)) return
+        val s = transform.scale.toDouble()
+        cb(
+            (0.0 - transform.tx) / s,
+            (0.0 - transform.ty) / s,
+            (width - transform.tx.toDouble()) / s,
+            (height - transform.ty.toDouble()) / s,
+        )
     }
 
     /**
@@ -388,9 +425,11 @@ class InkView @JvmOverloads constructor(
         if (live != null && debugEnabled && lowLatency) sampleViewLatency()
         // Agent annotation layer (Stage 6): rendered in both debug and release when the
         // layer is visible, through AnnotationRenderer (which paints the 70% opacity).
+        // Stage 35: through the job's export region (origin (0,0) over the page if none).
         if (agentLayerVisible && agentAnnotations.isNotEmpty()) {
             AnnotationRenderer(
-                accentColor, canvasWidthCu, canvasHeightCu,
+                accentColor,
+                agentRegion ?: com.inkwell.render.CoordinateMapping.Region.page(canvasWidthCu, canvasHeightCu),
                 agentOriginCanvas = agentOriginCanvas,
             ).draw(canvas, transform, agentAnnotations)
         }
@@ -955,6 +994,7 @@ class InkView @JvmOverloads constructor(
         lastFocusY = fy
         lastSpan = span
         onTransformChanged()
+        reportViewport()
         invalidate()
     }
 
