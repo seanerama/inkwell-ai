@@ -246,7 +246,29 @@ object CoordinateMapping {
         heightCu: Int = DEFAULT_HEIGHT_CU,
     ): Pair<Int, Int> {
         val scale = exportScale(widthCu, heightCu)
-        return (widthCu * scale).roundToInt() to (heightCu * scale).roundToInt()
+        // Stage 35: never 0 — a 0-px side cannot be allocated. Unreachable for any region
+        // that passes [isExportable]; a defensive floor that never changes a real export.
+        return (widthCu * scale).roundToInt().coerceAtLeast(1) to (heightCu * scale).roundToInt().coerceAtLeast(1)
+    }
+
+    /**
+     * Stage 35: the smallest export side, in px, worth sending. 16 px is about 1% of the
+     * 1568 px long edge — for a page-high region that is a strip about 36 CU wide, narrower
+     * than one handwritten letter, so nothing legible can be in it. A thinner region would
+     * also round to a 0-px side (a crash in `Bitmap.createBitmap`).
+     */
+    const val MIN_EXPORT_SIDE_PX = 16
+
+    /**
+     * Stage 35: true when [region]'s export would be at least [MIN_EXPORT_SIDE_PX] on both
+     * sides (by the unrounded-then-rounded formula, before any floor). A sliver region — the
+     * page's edge just inside the screen — is treated as no region: Send is disabled.
+     */
+    fun isExportable(region: Region): Boolean {
+        if (region.widthCu <= 0 || region.heightCu <= 0) return false
+        val scale = exportScale(region.widthCu, region.heightCu)
+        return (region.widthCu * scale).roundToInt() >= MIN_EXPORT_SIDE_PX &&
+            (region.heightCu * scale).roundToInt() >= MIN_EXPORT_SIDE_PX
     }
 
     /** [Export] metadata for the job body (contract `device-api` `export`). */

@@ -49,8 +49,11 @@ _FAILURE_BODIES = {
 _DEFAULT_WIDTH_CU = 2480
 _DEFAULT_HEIGHT_CU = 3508
 
-# The largest size the ``canvases.width_cu`` / ``height_cu`` INTEGER columns can hold.
-_MAX_CU = 2**31 - 1
+# The largest region side accepted for sizing a formalized canvas: 2 x the longest A4
+# edge (7016 CU), the device's legibility floor (contract coordinate-mapping, ADR-0014
+# additions) — the device never exports a larger region, so anything bigger is not a real
+# region and falls back to the source canvas / A4.
+_MAX_REGION_CU = 2 * _DEFAULT_HEIGHT_CU
 
 
 def _region_size(request: dict) -> tuple[int, int] | None:
@@ -59,8 +62,8 @@ def _region_size(request: dict) -> tuple[int, int] | None:
     Stage 35 (ADR-0014 §6, contract device-api "ADR-0014 additions"): an agent job exports
     a **region** of the canvas and ``export.width_cu/height_cu`` are its size. ``export``
     stays an opaque dict everywhere else, so it is read defensively here: both values must
-    be positive integers (not bools, not floats, not strings) that fit the column, or the
-    region is ignored and the caller falls back.
+    be positive integers (not bools, not floats, not strings) no larger than 7016 CU (the
+    device's legibility floor), or the region is ignored and the caller falls back.
     """
     export = request.get("export")
     if not isinstance(export, dict):
@@ -68,7 +71,7 @@ def _region_size(request: dict) -> tuple[int, int] | None:
     width = export.get("width_cu")
     height = export.get("height_cu")
     for value in (width, height):
-        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= _MAX_CU:
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 < value <= _MAX_REGION_CU:
             return None
     return width, height
 

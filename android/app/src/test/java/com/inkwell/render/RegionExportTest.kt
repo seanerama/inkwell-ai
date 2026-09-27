@@ -259,4 +259,64 @@ class RegionExportTest {
         // The column boundary at x = 0 CU lands at round(1000 x scale) px.
         assertTrue(chunks.any { it[0] == Math.round(1000 * scale.toDouble()).toInt() })
     }
+
+    // --- review fix: sliver regions are not exportable (MIN_EXPORT_SIDE_PX = 16) ---
+
+    @Test
+    fun a_one_cu_sliver_is_not_exportable_and_never_exports_a_zero_px_side() {
+        // The page's right edge 0.8 CU inside the screen's left: region (2479, 0, 1, 3508).
+        val sliver = region(2479.2, -10.0, 4000.0, 3600.0, PageExtent.SINGLE)
+        assertEquals(CoordinateMapping.Region(2479, 0, 1, 3508), sliver)
+        assertFalse(CoordinateMapping.isExportable(sliver!!))
+        // The formula alone would round the width to 0 px; the defensive floor keeps it 1.
+        assertEquals(1 to 1568, CoordinateMapping.exportDimensions(1, 3508))
+    }
+
+    @Test
+    fun the_minimum_export_side_boundary_is_16_px() {
+        // 35 CU of a page-high region → round(15.645) = 16 px: exportable.
+        assertEquals(16, CoordinateMapping.exportDimensions(35, 3508).first)
+        assertTrue(CoordinateMapping.isExportable(CoordinateMapping.Region(2445, 0, 35, 3508)))
+        // 34 CU → round(15.197) = 15 px: not exportable.
+        assertEquals(15, CoordinateMapping.exportDimensions(34, 3508).first)
+        assertFalse(CoordinateMapping.isExportable(CoordinateMapping.Region(2446, 0, 34, 3508)))
+        // The same on the other axis (a page-wide strip exports at 1568/2480 px/CU: 24 CU →
+        // 15 px, 25 CU → 16 px), and a whole page is of course fine.
+        assertFalse(CoordinateMapping.isExportable(CoordinateMapping.Region(0, 3484, 2480, 24)))
+        assertTrue(CoordinateMapping.isExportable(CoordinateMapping.Region(0, 3483, 2480, 25)))
+        assertTrue(CoordinateMapping.isExportable(CoordinateMapping.Region(0, 0, pageW, pageH)))
+    }
+
+    // --- review fix: oversized pages export at a coarser LOD instead of dropping ink ---
+
+    private val budget = LayerRenderer.DEFAULT_BUDGET_BYTES
+
+    @Test
+    fun a4_pages_always_export_at_lod_0_so_byte_identity_holds() {
+        fun lod(w: Int, h: Int, grid: PageExtent) =
+            CanvasExporter.exportLod(w, h, grid, CoordinateMapping.exportScale(w, h), budget)
+        assertEquals(0, lod(2480, 3508, PageExtent.SINGLE))
+        assertEquals(0, lod(3508, 2480, PageExtent.SINGLE))
+        assertEquals(0, lod(1600, 1200, PageExtent.SINGLE))
+        // Multi-page A4 grids (one page pass + neighbouring sub-tiles) stay at LOD 0 too.
+        assertEquals(0, CanvasExporter.exportLod(2480, 3508, PageExtent(-1, 1, 0, 1), 0.3, budget))
+    }
+
+    @Test
+    fun an_oversized_page_exports_at_a_coarser_lod_still_finer_than_the_export() {
+        // A formalized canvas the size of the largest region (7016 × 7016 CU): LOD 0 would
+        // be 196.9 MB, over the 96 MB budget.
+        val scale = CoordinateMapping.exportScale(7016, 7016) // 0.2235 px/CU
+        val lod = CanvasExporter.exportLod(7016, 7016, PageExtent.SINGLE, scale, budget)
+        assertEquals(1, lod)
+        assertTrue(TileMath.lodResolution(lod) >= scale)
+        val bytes = TileMath.pagePixels(7016, lod).toLong() * TileMath.pagePixels(7016, lod) * 4
+        assertTrue("fits the budget: $bytes", bytes <= budget)
+        // 7016 × 3508 (98.4 MB) still fits the 96 MiB (100.7 MB) budget: LOD 0; just past
+        // it, 7016 × 3600 (101.0 MB), steps down one LOD.
+        assertEquals(0, CanvasExporter.exportLod(7016, 3508, PageExtent.SINGLE, CoordinateMapping.exportScale(7016, 3508), budget))
+        assertEquals(1, CanvasExporter.exportLod(7016, 3600, PageExtent.SINGLE, CoordinateMapping.exportScale(7016, 3600), budget))
+        // Never coarser than the export itself, even when nothing fits.
+        assertEquals(0, CanvasExporter.exportLod(7016, 7016, PageExtent.SINGLE, 0.9, budget))
+    }
 }

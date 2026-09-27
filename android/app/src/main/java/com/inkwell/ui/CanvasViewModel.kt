@@ -383,7 +383,10 @@ class CanvasViewModel(
         // Stage 12: if this is the freshly opened redraw canvas, show its diagram + card.
         pendingRedraw?.takeIf { it.canvasId == state.canvasId }?.let { redraw ->
             agentAnnotations = redraw.annotations
-            agentRegion = redraw.region
+            // Stage 35: a redraw maps 1:1 onto its new canvas at origin (0,0), through the
+            // size the SERVER gave that canvas (stored with it) — never the size the device
+            // asked for — so an older server that sized it from the source cannot stretch it.
+            agentRegion = CoordinateMapping.Region.page(state.widthCu, state.heightCu)
             annotationsById = redraw.annotations.associateBy { it.id }
             agentLayerVisible = true
             panel = redraw.panel
@@ -528,8 +531,18 @@ class CanvasViewModel(
             val w = canvasWidth
             val h = canvasHeight
             val grid = pageExtent
-            val result = withContext(Dispatchers.Default) {
-                CanvasExporter.export(region, w, h, grid, layers)
+            val result = try {
+                withContext(Dispatchers.Default) { CanvasExporter.export(region, w, h, grid, layers) }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                exportInfo = exportFailedMessage(e)
+                showExportPreview = true
+                return@launch
+            } catch (e: OutOfMemoryError) {
+                exportInfo = exportFailedMessage(e)
+                showExportPreview = true
+                return@launch
             }
             when (result) {
                 is CanvasExporter.Result.Success -> {
@@ -576,8 +589,9 @@ class CanvasViewModel(
     /**
      * The region an agent job exports right now (ADR-0014 §4): the viewport intersected with
      * the page-grid bounds, snapped to whole CU — or the whole grid before the view has
-     * reported a viewport. Null when the viewport shows no page. A single-page canvas seen
-     * whole is `(0, 0, width, height)`, the v1 export.
+     * reported a viewport. Null when the viewport shows no page, or only a sliver of one
+     * whose export would be under [CoordinateMapping.MIN_EXPORT_SIDE_PX] on a side. A
+     * single-page canvas seen whole is `(0, 0, width, height)`, the v1 export.
      */
     fun currentExportRegion(): CoordinateMapping.Region? {
         val grid = pageExtent
@@ -589,8 +603,12 @@ class CanvasViewModel(
         val gr = (grid.maxCol + 1).toLong() * w
         val gb = (grid.maxRow + 1).toLong() * h
         val v = viewportCu
-            ?: return CoordinateMapping.visibleRegion(gl.toDouble(), gt.toDouble(), gr.toDouble(), gb.toDouble(), gl, gt, gr, gb)
-        return CoordinateMapping.visibleRegion(v[0], v[1], v[2], v[3], gl, gt, gr, gb)
+        val region = if (v == null) {
+            CoordinateMapping.visibleRegion(gl.toDouble(), gt.toDouble(), gr.toDouble(), gb.toDouble(), gl, gt, gr, gb)
+        } else {
+            CoordinateMapping.visibleRegion(v[0], v[1], v[2], v[3], gl, gt, gr, gb)
+        }
+        return region?.takeIf { CoordinateMapping.isExportable(it) }
     }
 
     /** Recompute [sendBlockedHint] from the current viewport, grid and page size. */
@@ -602,6 +620,10 @@ class CanvasViewModel(
             else -> null
         }
     }
+
+    /** Stage 35: the inline send status for an export that failed (never a crash). */
+    private fun exportFailedMessage(e: Throwable): String =
+        "Could not export the canvas: ${e.message ?: e.javaClass.simpleName}"
 
     /** True when Send / Ask / the job-type picker may be used (online and not blocked). */
     val canSend: Boolean get() = online && sendBlockedHint == null
@@ -746,14 +768,26 @@ class CanvasViewModel(
             val pageW = canvasWidth
             val pageH = canvasHeight
             val grid = pageExtent
-            val result = withContext(ioDispatcher) {
-                val exportRasters = pushedRasterSource?.exportRastersFor(cId) ?: emptyList()
-                val inject = exporter
-                if (exportRasters.isEmpty() && inject != null) {
-                    inject(region, exportLayers)
-                } else {
-                    CanvasExporter.export(region, pageW, pageH, grid, exportLayers, exportRasters)
+            // An export failure (allocation, an incomplete render) is a send error, never a
+            // crash: it is shown inline and nothing is posted.
+            val result = try {
+                withContext(ioDispatcher) {
+                    val exportRasters = pushedRasterSource?.exportRastersFor(cId) ?: emptyList()
+                    val inject = exporter
+                    if (exportRasters.isEmpty() && inject != null) {
+                        inject(region, exportLayers)
+                    } else {
+                        CanvasExporter.export(region, pageW, pageH, grid, exportLayers, exportRasters)
+                    }
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                sendStatus = exportFailedMessage(e)
+                return@launch
+            } catch (e: OutOfMemoryError) {
+                sendStatus = exportFailedMessage(e)
+                return@launch
             }
             val (png, export) = when (result) {
                 is CanvasExporter.Result.Success -> result.png to result.export
@@ -860,9 +894,6 @@ class CanvasViewModel(
                 canvasId = outcome.openCanvasId,
                 annotations = outcome.annotations,
                 panel = panelModel,
-                // Stage 35: the server sizes the new canvas from the export region, so the
-                // redraw maps 1:1 onto it at origin (0,0) (contract device-api ADR-0014).
-                region = outcome.region?.let { CoordinateMapping.Region.page(it.widthCu, it.heightCu) },
             )
             if (cardActionsEnabled) persistAllCardStates(panelCards)
             pendingOpenCanvasId = outcome.openCanvasId
@@ -889,8 +920,6 @@ class CanvasViewModel(
         val canvasId: String,
         val annotations: List<Annotation>,
         val panel: PanelModel,
-        /** Stage 35: the job's region rebased onto the new canvas; null = its page at (0,0). */
-        val region: CoordinateMapping.Region?,
     )
 
     fun dismissPanel() {

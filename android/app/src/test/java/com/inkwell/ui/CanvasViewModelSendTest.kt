@@ -255,6 +255,9 @@ class CanvasViewModelSendTest {
     /** Stage 35: the regions the exporter was asked for, in order. */
     private val exportedRegions = mutableListOf<CoordinateMapping.Region>()
 
+    /** Stage 35 review: when set, the exporter throws this (an allocation failure, say). */
+    private var exportFailure: Throwable? = null
+
     private fun viewModel(
         oneTapAsk: Boolean = true,
         cardActionsEnabled: Boolean = false,
@@ -285,7 +288,11 @@ class CanvasViewModelSendTest {
             brainEnabled = brainEnabled,
             formalizedCanvasStore = repo,
             ioDispatcher = dispatcher,
-            exporter = { region, layers -> exportedRegions += region; fakeExporter(region, layers) },
+            exporter = { region, layers ->
+                exportedRegions += region
+                exportFailure?.let { throw it }
+                fakeExporter(region, layers)
+            },
             // These Stage-7/10/12 send tests exercise the flag-OFF space path (resolve the
             // "work" space by slug). The Stage-14 canvas-space send path has its own test.
             spacesEnabled = false,
@@ -522,6 +529,78 @@ class CanvasViewModelSendTest {
         assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendBlockedHint)
         vm.send()
         assertTrue(api.submitted.isEmpty())
+    }
+
+    @Test
+    fun a_sliver_region_is_no_region_send_is_disabled_and_nothing_crashes() {
+        val vm = viewModel()
+        // The page's right edge is 0.8 CU inside the screen's left edge: region (2479,0,1,3508)
+        // would export 0 px wide.
+        vm.onViewportChanged(2479.2, -10.0, 4000.0, 3600.0)
+        assertNull(vm.currentExportRegion())
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendBlockedHint)
+        assertFalse(vm.canSend)
+        vm.send()
+        assertTrue(exportedRegions.isEmpty() && api.submitted.isEmpty())
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendStatus)
+    }
+
+    @Test
+    fun the_sliver_threshold_is_16_export_px() {
+        val vm = viewModel()
+        vm.onViewportChanged(2446.0, -10.0, 4000.0, 3600.0) // 34 CU wide → 15 px
+        assertEquals(CanvasViewModel.NO_REGION_HINT, vm.sendBlockedHint)
+        vm.onViewportChanged(2445.0, -10.0, 4000.0, 3600.0) // 35 CU wide → 16 px
+        assertNull(vm.sendBlockedHint)
+        vm.send()
+        assertEquals(CoordinateMapping.Region(2445, 0, 35, pageH), exportedRegions.single())
+        assertEquals(16, wireBody(api.submitted.single())["export"]!!.jsonObject["w"]!!.jsonPrimitive.content.toInt())
+    }
+
+    @Test
+    fun an_export_failure_is_a_send_status_not_a_crash() {
+        val vm = viewModel()
+        exportFailure = IllegalArgumentException("width and height must be > 0")
+        vm.send()
+        assertTrue("nothing posted", api.submitted.isEmpty())
+        assertEquals("Could not export the canvas: width and height must be > 0", vm.sendStatus)
+        assertFalse(vm.jobInProgress)
+        exportFailure = OutOfMemoryError("tile")
+        vm.send()
+        assertEquals("Could not export the canvas: tile", vm.sendStatus)
+        // A later send works.
+        exportFailure = null
+        vm.send()
+        assertEquals(1, api.submitted.size)
+    }
+
+    @Test
+    fun a_formalize_redraw_maps_through_the_canvas_size_the_server_returned() {
+        // The device exported the whole A4 page, but an older server sized the new canvas from
+        // the (differently sized) source: the diagram maps through the returned 1600 × 1200.
+        api = FakeDeviceApi(
+            """
+            {
+              "summary": "Redrew it.",
+              "annotations": [ { "id": "b1", "type": "rect", "x": 0.1, "y": 0.1, "w": 0.2, "h": 0.1 } ],
+              "cards": [ { "kind": "answer", "title": "Cleaned up", "body": "Aligned.", "anchors": [], "actions": [] } ],
+              "brain_writes": [],
+              "contract_version": "agent-output/v1",
+              "canvas": { "id": "srv-fmz-1", "space_id": "space-work", "title": "T — formalized",
+                          "width_cu": 1600, "height_cu": 1200, "origin": "agent" },
+              "source_canvas_id": null
+            }
+            """.trimIndent(),
+        )
+        val vm = viewModel(cardActionsEnabled = true, formalizeEnabled = true)
+        vm.selectJobType("formalize")
+        vm.onViewportChanged(0.0, 0.0, 2480.0, 3508.0)
+        vm.onSendTapped()
+        assertEquals(CoordinateMapping.Region(0, 0, pageW, pageH), exportedRegions.single())
+        val newId = requireNotNull(vm.pendingOpenCanvasId)
+        vm.openCanvas(newId)
+        assertEquals(1, vm.agentAnnotations.size)
+        assertEquals(CoordinateMapping.Region(0, 0, 1600, 1200), vm.agentRegion)
     }
 
     @Test

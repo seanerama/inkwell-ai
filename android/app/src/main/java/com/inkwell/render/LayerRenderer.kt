@@ -271,6 +271,13 @@ class LayerRenderer(
 
     val lastFrameTiles: List<TileKey> get() = lastFrameSpecs.map { it.key }
 
+    /**
+     * Stage 35: false when the last [draw] skipped a visible tile because its bitmap could
+     * not be allocated — its ink is missing from that frame. The exporter fails the export
+     * instead of sending an image with ink silently dropped.
+     */
+    val lastFrameComplete: Boolean get() = lastFrameDrawn.size == lastFrameSpecs.size
+
     // --- Tiles ---
 
     private fun drawCommitted(out: Canvas, transform: CanvasTransform) {

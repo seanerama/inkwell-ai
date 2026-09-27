@@ -192,8 +192,21 @@ object CanvasExporter {
         // is still rasterised at full resolution and downsampled exactly as before
         // (byte-identical PNG, contract `coordinate-mapping`). Its tiles are reused across
         // layers (rebuilt per layer) instead of allocating a page-sized bitmap per layer.
-        val renderer = LayerRenderer().apply {
-            fixedLod = 0
+        // Stage 35: an oversized page (e.g. a formalized canvas up to 7016 CU a side) whose
+        // LOD-0 tile set would not fit the tile budget renders at a coarser LOD that is still
+        // at least the export's own resolution, rather than failing to allocate and dropping
+        // the ink ([exportLod]; A4 and every page up to the budget stay at LOD 0).
+        val renderer = LayerRenderer()
+        val lod = exportLod(pageWidthCu, pageHeightCu, extent, scale.toDouble(), renderer.budgetBytes)
+        if (lod > 0) {
+            android.util.Log.i(
+                TAG,
+                "export: page ${pageWidthCu}x$pageHeightCu CU exceeds the LOD-0 tile budget; rendering at LOD $lod " +
+                    "(${TileMath.lodResolution(lod)} px/CU, export ${"%.3f".format(scale)} px/CU)",
+            )
+        }
+        renderer.apply {
+            fixedLod = lod
             setCanvasSize(pageWidthCu, pageHeightCu)
             setPageExtent(extent)
         }
@@ -212,12 +225,14 @@ object CanvasExporter {
                         renderer.invalidateAll()
                         if (chunks == null) {
                             renderer.draw(canvas, transform)
+                            checkComplete(renderer)
                         } else {
                             for (clip in chunks) {
                                 canvas.save()
                                 canvas.clipRect(clip[0], clip[1], clip[2], clip[3])
                                 renderer.draw(canvas, transform)
                                 canvas.restore()
+                                checkComplete(renderer)
                             }
                         }
                     }
@@ -267,6 +282,44 @@ object CanvasExporter {
         }
         return out
     }
+
+    /** Stage 35: an export never goes out with ink silently missing (a tile that failed to allocate). */
+    private fun checkComplete(renderer: LayerRenderer) {
+        check(renderer.lastFrameComplete) { "not enough memory to render the ink for export" }
+    }
+
+    /**
+     * Stage 35: the LOD the export rasterises ink at. LOD 0 (1 px/CU, the byte-identical
+     * stage-32 path) whenever one grid page's tiles — plus, on a multi-page grid, the
+     * neighbouring sub-tiles a clipped page pass can touch — fit [budgetBytes]; otherwise the
+     * next coarser LOD, but never coarser than the export itself ([exportScale] px/CU), so the
+     * tile is still downsampled into the PNG. A4 (34.8 MB) and landscape A4 are always LOD 0.
+     * Pure, JVM-tested.
+     */
+    internal fun exportLod(
+        pageWidthCu: Int,
+        pageHeightCu: Int,
+        extent: com.inkwell.data.PageExtent,
+        exportScale: Double,
+        budgetBytes: Long,
+    ): Int {
+        var lod = 0
+        while (true) {
+            val pageBytes = TileMath.pagePixels(pageWidthCu, lod).toLong() *
+                TileMath.pagePixels(pageHeightCu, lod) * TileMath.BYTES_PER_PIXEL
+            val need = if (extent.pageCount <= 1) {
+                pageBytes
+            } else {
+                val d = TileMath.subdivisions(extent, lod).toLong()
+                pageBytes * (d + 2) * (d + 2) / (d * d)
+            }
+            if (need <= budgetBytes) return lod
+            if (lod >= TileMath.MAX_LOD || TileMath.lodResolution(lod + 1) < exportScale) return lod
+            lod++
+        }
+    }
+
+    private const val TAG = "CanvasExporter"
 
     /** The two kinds of drawable, ordered by `z` via [ExportComposition] (raster below ink). */
     private sealed interface DrawOp : ExportComposition.Ordered {

@@ -311,3 +311,23 @@ def test_formalize_region_without_source_canvas_sizes_from_region(client, auth, 
     got = client.get(f"/v1/jobs/{job_id}", headers=auth).json()
     assert got["result"]["canvas"]["width_cu"] == 3508
     assert got["result"]["canvas"]["height_cu"] == 2480
+
+
+def test_formalize_accepts_a_region_up_to_the_legibility_floor(client, auth, agent_on, db):
+    # 7016 CU (2 x the longest A4 edge) is the largest region the device exports.
+    export = {"w": 1568, "h": 784, "width_cu": 7016, "height_cu": 3508}
+    assert _formalized_dims(client, auth, db, export=export) == (7016, 3508)
+
+
+@pytest.mark.parametrize(
+    "export",
+    [
+        {"width_cu": 7017, "height_cu": 3508},
+        {"width_cu": 3508, "height_cu": 7017},
+        {"width_cu": 100_000, "height_cu": 100_000},
+    ],
+)
+def test_formalize_region_past_the_floor_falls_back_to_the_source(
+    client, auth, agent_on, db, export
+):
+    assert _formalized_dims(client, auth, db, export=export) == (1600, 1200)

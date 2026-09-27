@@ -173,4 +173,26 @@ class CanvasExportInstrumentedTest {
         assertEquals(Color.BLACK, b2.getPixel(2, (1000f * k2).roundToInt()))
         b2.recycle()
     }
+
+    /**
+     * Stage 35 review: an oversized single page (a formalized canvas the size of the largest
+     * region, 7016 × 7016 CU) would need a 197 MB LOD-0 tile, over the 96 MB budget. The export
+     * renders it at a coarser LOD instead of silently dropping the ink: the bar is there.
+     */
+    @Test
+    fun oversized_page_export_keeps_its_ink() {
+        val big = 7016
+        val bar = rect("big", 3508f, 3508f, 2000f)
+        val result = CanvasExporter.export(big, big, listOf(ExportLayer(z = 0, visible = true, strokes = listOf(bar))))
+        assertTrue("export should succeed", result is CanvasExporter.Result.Success)
+        result as CanvasExporter.Result.Success
+        assertEquals(1568, result.export.w)
+        assertEquals(1568, result.export.h)
+        val bmp = BitmapFactory.decodeByteArray(result.png, 0, result.png.size)
+        val k = CoordinateMapping.exportScale(big, big)
+        val px = bmp.getPixel((3508f * k).roundToInt(), (3508f * k).roundToInt())
+        assertTrue("the bar is exported, was #${Integer.toHexString(px)}", Color.red(px) < 110 && Color.blue(px) < 110)
+        assertEquals(Color.WHITE, bmp.getPixel(5, 5))
+        bmp.recycle()
+    }
 }
