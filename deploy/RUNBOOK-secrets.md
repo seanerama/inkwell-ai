@@ -17,6 +17,13 @@
   a local set and updates `latest`; a non-zero exit means do not proceed.
 - **Never** run `docker compose config` and **never** `cat .env` (both leak secrets).
   Edit a single key in `.env` with an editor or a targeted `sed`.
+- **Secret rule (Stage 37, enforced outside dev):** `INKWELL_TOKEN_PEPPER`,
+  `INKWELL_BLOB_SIGNING_KEY` and (when set) `INKWELL_TOKEN_PEPPER_PREVIOUS` must each be
+  **≥ 32 characters**, not the committed dev default, and **distinct** (pepper ≠ blob key,
+  previous ≠ pepper). Generate with `openssl rand -hex 32`. A new value that breaks the
+  rule makes api/worker refuse to start, so **after editing `.env` and before
+  `dc up -d`**, run `dc run --rm -T api inkwell config check` — it must print
+  `config ok (env=<env>)`; otherwise it names the variable and rule (never the value).
 - After every rotation, record it with the `verity status note` line given at the end
   of the section — **dates and names only, never values**.
 
@@ -55,8 +62,9 @@
   stop verifying (short-lived; the device would re-request).
 - **Precondition (backup):** none required (no data change).
 - **Steps:**
-  1. Edit `.env`: set `INKWELL_BLOB_SIGNING_KEY=<new>`.
-  2. `dc up -d api worker`.
+  1. Edit `.env`: set `INKWELL_BLOB_SIGNING_KEY=<new>` (≥ 32 chars, ≠ the pepper).
+  2. `dc run --rm -T api inkwell config check` → `config ok (env=<env>)`.
+  3. `dc up -d api worker`.
 - **Verification:** `dc up -d api worker`, then poll `/v1/health` until
   `{"status":"ok"}`, then `dc exec -T api inkwell canary` — exports still store and the
   job runs (this is what is observable today; there is no blob route to verify a signed
@@ -98,7 +106,9 @@
   1. `dc exec -T api inkwell token rotate-pepper --begin` — records the next generation
      in `app_meta` and prints these steps. It touches no secret.
   2. In `.env` set `INKWELL_TOKEN_PEPPER_PREVIOUS=<old-pepper>` and
-     `INKWELL_TOKEN_PEPPER=<new-pepper>`.
+     `INKWELL_TOKEN_PEPPER=<new-pepper>` (both ≥ 32 chars, different from each other
+     and from the blob key), then `dc run --rm -T api inkwell config check` →
+     `config ok (env=<env>)`.
   3. `dc up -d api worker`.
   4. Use the tablet once — any `/v1/sync` (open the app, let it sync), or the operator's
      curl with the tablet token. This re-hashes its token to the new pepper/generation.

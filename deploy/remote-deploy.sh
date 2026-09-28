@@ -21,12 +21,29 @@ docker compose -f compose.yml pull -q </dev/null
 
 # Postgres first; wait until it accepts connections.
 docker compose -f compose.yml up -d postgres </dev/null
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if docker compose -f compose.yml exec -T postgres pg_isready -U inkwell >/dev/null 2>&1 </dev/null; then
     echo ">> postgres ready"; break
   fi
   sleep 2
 done
+
+# Config check (Stage 37): validate the .env with the NEW image before any backup, migrate
+# or swap. Outside dev the server refuses missing/default/short/duplicate secrets; catching
+# that here aborts the deploy with the old containers still serving. The output names the
+# variable and rule, never a value.
+echo ">> config check (new image)"
+if ! CONFIG_OUT="$(docker compose -f compose.yml run --rm -T api inkwell config check 2>&1 </dev/null)"; then
+  printf '%s\n' "${CONFIG_OUT}" >&2
+  # Put the previous IMAGE_REF back so a later `up -d` does not pick up the rejected image.
+  if [ -n "${PREVIOUS}" ]; then
+    sed -i "s|^IMAGE_REF=.*|IMAGE_REF=${PREVIOUS}|" .env
+  fi
+  echo "!! config check FAILED — fix ${REMOTE_DIR}/.env (see the rule above; secrets must be >= 32 chars, non-default, distinct)." >&2
+  echo "!! deploy aborted before migrate; the old containers are still running." >&2
+  exit 1
+fi
+echo ">> $(printf '%s\n' "${CONFIG_OUT}" | tail -n1)"
 
 # Pre-deploy backup (ADR-0011): a snapshot before any migration so rollback always has a
 # matching set. Refresh the on-host copies of the backup/restore scripts (shipped to /tmp
@@ -56,7 +73,7 @@ docker compose -f compose.yml up -d --remove-orphans </dev/null
 
 echo ">> polling ${HEALTH_URL}"
 HEALTHY=0
-for i in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if curl -fsS "${HEALTH_URL}" | grep -q '"status":"ok"'; then
     echo ">> health ok: $(curl -fsS "${HEALTH_URL}")"
     docker compose -f compose.yml ps --format "table {{.Name}}\t{{.Status}}" </dev/null

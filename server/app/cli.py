@@ -8,6 +8,10 @@ inkwell token rotate-pepper --end    # close the window (refuses while migrate-c
 inkwell token migrate-check          # exit 0 only when no live token lags the generation
 inkwell db seed                      # idempotently seed the four default spaces
 inkwell canary [--space work] [--timeout 90]  # run one live agent job (deploy gate)
+inkwell config check                 # validate settings (fail closed outside dev), exit 0/1
+
+Every command loads and validates settings first (Stage 37): outside dev, a missing,
+default or weak secret makes the command exit non-zero naming the variable and rule.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from app.config import get_settings
+from app.config import ConfigError, get_settings
 from app.db.base import get_sessionmaker
 from app.db.models import DeviceToken
 from app.db.seed import seed_default_spaces
@@ -225,6 +229,16 @@ def _cmd_push_canvas(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_config_check(_: argparse.Namespace) -> int:
+    """Exit 0 with ``config ok (env=...)`` when settings validate (Stage 37).
+
+    Reached only after ``main`` has already loaded settings successfully; a failing
+    configuration is reported (rule + variable name, never a value) by ``main``.
+    """
+    print(f"config ok (env={get_settings().env})")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="inkwell")
     sub = parser.add_subparsers(dest="group", required=True)
@@ -292,12 +306,26 @@ def build_parser() -> argparse.ArgumentParser:
     push_canvas_p.add_argument("--note", default=None, help="optional answer-card body")
     push_canvas_p.set_defaults(func=_cmd_push_canvas)
 
+    config = sub.add_parser("config", help="configuration checks")
+    config_sub = config.add_subparsers(dest="action", required=True)
+    config_check = config_sub.add_parser(
+        "check", help="validate settings (fails outside dev on missing/default/weak secrets)"
+    )
+    config_check.set_defaults(func=_cmd_config_check)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    # Stage 37: every command fails closed on an insecure configuration, before it touches
+    # the database. The message names the variable(s) and rule(s), never a value.
+    try:
+        get_settings()
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 1
     return args.func(args)
 
 
