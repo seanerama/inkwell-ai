@@ -10,6 +10,24 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# The throwaway .env below must be authoritative. docker compose gives the CALLER's shell
+# environment precedence over --env-file when interpolating ${VAR} in compose.yml, and
+# the CI gates job exports INKWELL_TOKEN_PEPPER=ci-pepper (for pytest) — which would
+# override this stack's pepper (and, since Stage 37, fail the staging config check).
+# Drop every compose-interpolated key inherited from the caller; scripts invoked below
+# get their INKWELL_SRV_DIR/INKWELL_BACKUPS_DIR/COMPOSE_PROJECT_NAME set inline.
+while IFS= read -r inherited; do
+  case "$inherited" in
+    INKWELL_*|AGENT_*|SPACES_*|PUSH_*|BRAIN_*|IMAGE_REF|API_PORT|POSTGRES_PASSWORD|ANTHROPIC_API_KEY)
+      unset "$inherited" ;;
+    *) ;;
+  esac
+done < <(compgen -e)
+
+# Low-entropy, obviously fake throwaway secrets (>= 32 chars, distinct; Stage 37 rule).
+CI_TOKEN_PEPPER="ci-token-pepper-$(printf '%032d' 0)"
+CI_BLOB_SIGNING_KEY="ci-blob-signing-key-$(printf '%032d' 1)"
 cd "$REPO_ROOT"
 
 IMAGE_REF="inkwell-ai-server:ci"
@@ -45,8 +63,8 @@ INKWELL_ENV=staging
 API_PORT=${API_PORT}
 AGENT_ENABLED=false
 POSTGRES_PASSWORD=ci-postgres-pass-original
-INKWELL_TOKEN_PEPPER=ci-token-pepper
-INKWELL_BLOB_SIGNING_KEY=ci-blob-signing-key
+INKWELL_TOKEN_PEPPER=${CI_TOKEN_PEPPER}
+INKWELL_BLOB_SIGNING_KEY=${CI_BLOB_SIGNING_KEY}
 ANTHROPIC_API_KEY=sk-ant-ci-unused
 ENV
 
@@ -58,6 +76,21 @@ for _ in $(seq 1 30); do
   dc exec -T postgres pg_isready -U inkwell >/dev/null 2>&1 && break
   sleep 2
 done
+
+echo "== inkwell config check (Stage 37): ok on this .env, non-zero on a bad one =="
+CFG_OUT="$(dc run --rm -T --no-deps api inkwell config check 2>&1)" \
+  || fail "inkwell config check rejected the valid throwaway .env: ${CFG_OUT}"
+printf '%s\n' "$CFG_OUT" | grep -q '^config ok (env=staging)$' \
+  || fail "inkwell config check did not print 'config ok (env=staging)'"
+# A bad .env: the pepper blanked (compose turns it into an EMPTY string in the container).
+sed 's/^INKWELL_TOKEN_PEPPER=.*/INKWELL_TOKEN_PEPPER=/' "$SRV/staging/.env" > "$TMP/bad.env"
+if docker compose -p "$PROJECT" -f "$SRV/staging/compose.yml" --env-file "$TMP/bad.env" \
+     run --rm -T --no-deps api inkwell config check >"$TMP/bad-config.out" 2>&1; then
+  fail "inkwell config check exited 0 on a .env with a blank INKWELL_TOKEN_PEPPER"
+fi
+grep -q 'INKWELL_TOKEN_PEPPER' "$TMP/bad-config.out" \
+  || fail "the config-check failure did not name INKWELL_TOKEN_PEPPER"
+echo "ok: config check passes the valid .env and rejects the blank pepper (variable named)"
 
 echo "== migrate + seed spaces + mint token =="
 dc run --rm -T api alembic upgrade head

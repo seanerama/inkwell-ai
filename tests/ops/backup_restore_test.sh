@@ -10,6 +10,24 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# The throwaway .env below must be authoritative. docker compose gives the CALLER's shell
+# environment precedence over --env-file when interpolating ${VAR} in compose.yml, and
+# the CI gates job exports INKWELL_TOKEN_PEPPER=ci-pepper (for pytest) — which would
+# override this stack's pepper (and, since Stage 37, fail the staging config check).
+# Drop every compose-interpolated key inherited from the caller; scripts invoked below
+# get their INKWELL_SRV_DIR/INKWELL_BACKUPS_DIR/COMPOSE_PROJECT_NAME set inline.
+while IFS= read -r inherited; do
+  case "$inherited" in
+    INKWELL_*|AGENT_*|SPACES_*|PUSH_*|BRAIN_*|IMAGE_REF|API_PORT|POSTGRES_PASSWORD|ANTHROPIC_API_KEY)
+      unset "$inherited" ;;
+    *) ;;
+  esac
+done < <(compgen -e)
+
+# Low-entropy, obviously fake throwaway secrets (>= 32 chars, distinct; Stage 37 rule).
+CI_TOKEN_PEPPER="ci-token-pepper-$(printf '%032d' 0)"
+CI_BLOB_SIGNING_KEY="ci-blob-signing-key-$(printf '%032d' 1)"
 cd "$REPO_ROOT"
 
 IMAGE_REF="inkwell-ai-server:ci"
@@ -61,8 +79,8 @@ IMAGE_REF=${IMAGE_REF}
 INKWELL_ENV=staging
 API_PORT=${API_PORT}
 POSTGRES_PASSWORD=ci-postgres-pass
-INKWELL_TOKEN_PEPPER=ci-token-pepper
-INKWELL_BLOB_SIGNING_KEY=ci-blob-signing-key
+INKWELL_TOKEN_PEPPER=${CI_TOKEN_PEPPER}
+INKWELL_BLOB_SIGNING_KEY=${CI_BLOB_SIGNING_KEY}
 ANTHROPIC_API_KEY=sk-ant-ci-unused
 ENV
 

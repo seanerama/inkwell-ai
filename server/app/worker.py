@@ -63,11 +63,13 @@ def _listen_connection():
 
 def run() -> None:
     configure_logging()
+    # Stage 37: load (and so validate) settings before anything else; outside dev a
+    # missing/default/weak secret raises ConfigError and the worker never starts.
+    settings = get_settings()
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
 
     worker_id = _worker_id()
-    settings = get_settings()
     log.info("worker.start", worker_id=worker_id, poll_seconds=settings.worker_poll_seconds)
 
     conn = _listen_connection()

@@ -32,9 +32,15 @@ from app.logging import configure_logging
 
 def create_app() -> FastAPI:
     configure_logging()
+    # Stage 37: fails closed here (ConfigError) outside dev on missing/default/weak secrets.
     settings = get_settings()
 
-    app = FastAPI(title="Inkwell AI server", version=__version__)
+    # Stage 37: the OpenAPI schema and the interactive docs are dev-only. Outside dev they
+    # are not served at all (never contract routes; the tailnet alone is not auth).
+    docs_kwargs: dict = {}
+    if settings.env != "dev":
+        docs_kwargs = {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    app = FastAPI(title="Inkwell AI server", version=__version__, **docs_kwargs)
     app.state.rate_limiter = RateLimiter(settings.job_rate_limit_per_min)
     app.state.push_rate_limiter = RateLimiter(settings.push_rate_limit_per_min)
 

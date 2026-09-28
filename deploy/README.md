@@ -15,6 +15,23 @@ Secrets live only in each environment's `.env` (mode 600): `POSTGRES_PASSWORD`,
 `INKWELL_TOKEN_PEPPER`, `INKWELL_BLOB_SIGNING_KEY`, `ANTHROPIC_API_KEY`
 (unused until Stage 5). Copy `.env.example` and fill in real values.
 
+**Fail closed outside dev (Stage 37).** With `INKWELL_ENV` = `staging` or `prod` (any
+other value except `dev` is rejected), the api, worker and every `inkwell` command refuse
+to start unless `INKWELL_TOKEN_PEPPER` and `INKWELL_BLOB_SIGNING_KEY` are each **at
+least 32 characters**, **not** the committed dev default, and **different** from each
+other. `INKWELL_TOKEN_PEPPER_PREVIOUS`, when set, must meet the same rule and differ from
+the pepper. Generate with `openssl rand -hex 32`. Check an `.env` without starting
+anything:
+
+```sh
+docker compose -f compose.yml run --rm -T api inkwell config check
+# config ok (env=staging)            <- exit 0
+# config error: ... INKWELL_TOKEN_PEPPER is too short ...   <- exit 1, variable named, never the value
+```
+
+Outside dev the OpenAPI schema and docs (`/openapi.json`, `/docs`, `/redoc`) are not
+served (404); they remain available in local dev.
+
 ## One-time host setup (needs sudo; the operator runs it interactively)
 
 ```sh
@@ -40,6 +57,9 @@ The digest is published on every GitHub Release as the `server-image.digest` ass
 in the release body. Deploying by digest makes staging and prod byte-identical.
 `deploy.sh` records the previous reference in `.env.previous` on the host and prints
 it, so rollback is re-running `deploy.sh` with that reference (migrations are additive).
+Before the backup, migrate and swap, the deploy runs `inkwell config check` with the
+**new** image; a bad `.env` aborts there, prints the failing rule, puts the previous
+`IMAGE_REF` back, and leaves the old containers serving.
 
 Smoke check (also `.verity/smoke.json`, run by `verity smoke run`):
 
